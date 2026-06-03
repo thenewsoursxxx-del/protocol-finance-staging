@@ -75,8 +75,53 @@
  *   - Do NOT rely permanently on unrestricted client writes
  */
 
-var SUPABASE_URL = "https://cztfcseyzezincbwotvt.supabase.co";
-var SUPABASE_ANON_KEY = "sb_publishable_Ava2_GYcJBWjcFIL_VFzWQ_-r1DYIiU";
+/* ─────────────────────────────────────────────────────────────────────────
+ * ENVIRONMENT AUTO-DETECTION (PROD vs STAGING)
+ *
+ * Один и тот же код деплоится в ДВА GitHub-репозитория:
+ *   • PROD    — https://thenewsoursxxx-del.github.io/protocol-finance/
+ *   • STAGING — https://thenewsoursxxx-del.github.io/protocol-finance-staging/
+ *
+ * Чтобы не подменять ключи вручную при каждом переносе (и не зашить случайно
+ * staging-ключ в прод), окружение определяется автоматически по URL страницы.
+ * Признак staging: путь/хост содержит "-staging" ИЛИ есть ?env=staging.
+ *
+ * ⚠️ ЗАПОЛНИ STAGING-КЛЮЧИ после создания проекта "protocol-staging" в Supabase
+ * (Settings → API → Project URL и anon/publishable key). До заполнения staging
+ * автоматически падает обратно на прод-ключи, чтобы ничего не сломать.
+ * ──────────────────────────────────────────────────────────────────────── */
+var SUPABASE_ENVS = {
+  prod: {
+    url: "https://cztfcseyzezincbwotvt.supabase.co",
+    anonKey: "sb_publishable_Ava2_GYcJBWjcFIL_VFzWQ_-r1DYIiU"
+  },
+  staging: {
+    url: "https://phtfzkwbxxfrmloiolza.supabase.co",
+    anonKey: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBodGZ6a3dieHhmcm1sb2lvbHphIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA0NzkwOTgsImV4cCI6MjA5NjA1NTA5OH0.dgNUgAQGP0Sob-YbZCIyYbNSpDZ5QjEwcVgK53bSXoI"
+  }
+};
+
+function _detectSupabaseEnv() {
+  try {
+    var href = (location.href || "").toLowerCase();
+    var byUrl = href.indexOf("-staging") !== -1;
+    var byParam = false;
+    try { byParam = new URLSearchParams(location.search).get("env") === "staging"; } catch (_e) { /* ignore */ }
+    if (byUrl || byParam) return "staging";
+  } catch (_e) { /* ignore */ }
+  return "prod";
+}
+
+var SUPABASE_ENV = _detectSupabaseEnv();
+
+// Если staging выбран, но ключи ещё не заполнены — безопасный откат на прод.
+if (SUPABASE_ENV === "staging" && !SUPABASE_ENVS.staging.url) {
+  console.warn("[Supabase] STAGING выбран по URL, но ключи не заданы — откат на PROD-конфиг.");
+  SUPABASE_ENV = "prod";
+}
+
+var SUPABASE_URL = SUPABASE_ENVS[SUPABASE_ENV].url;
+var SUPABASE_ANON_KEY = SUPABASE_ENVS[SUPABASE_ENV].anonKey;
 
 var supabaseClient = null;
 
@@ -185,7 +230,7 @@ function initSupabaseClient() {
     });
 
     window.supabaseClient = supabaseClient;
-    console.log("[Supabase] Клиент создан (iOS-safe). URL:", SUPABASE_URL);
+    console.log("[Supabase] Клиент создан (iOS-safe). ENV:", SUPABASE_ENV, "URL:", SUPABASE_URL);
     return true;
   } catch (e) {
     console.error("[Supabase] createClient ошибка:", e.message, e);

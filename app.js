@@ -1195,6 +1195,8 @@ function computeGraphState() {
   factEvents.forEach(function (e) {
     if (e.frequency && e.frequency !== "once") return;
     if (e.type === "contribution") {
+      // Взносы в резерв не увеличивают линию «накоплено на цель» на графике.
+      if (e.meta && e.meta.to === "reserve") return;
       factBalance += e.amount;
     }
     if (e.type === "unexpected_expense" && (!e.meta || e.meta.source !== "skip")) {
@@ -2244,9 +2246,9 @@ loadFullState();
   // (self-healing - БД сама приведёт себя в порядок при следующем открытии).
   function computeEffectivePremium(flags) {
     if (!flags || flags.isPremium !== true) return false;
-    if (!flags.premiumUntil) return true; // legacy
+    if (!flags.premiumUntil) return false;
     var until = new Date(flags.premiumUntil).getTime();
-    if (isNaN(until)) return true;
+    if (isNaN(until)) return false;
     return until > Date.now();
   }
 
@@ -2267,14 +2269,8 @@ loadFullState();
 
       var effectivePremium = computeEffectivePremium(flags);
 
-      // Self-healing: если в БД is_premium=true, но premium_until прошёл -
-      // обновляем БД через setUserPremium(false) (fire-and-forget).
       if (flags.isPremium === true && !effectivePremium && flags.premiumUntil) {
-        console.log("[AccessFlags] подписка истекла (premium_until=" + flags.premiumUntil
-          + "), обновляем users.is_premium=false");
-        if (typeof window.setUserPremium === "function") {
-          window.setUserPremium(false).catch(function () { /* graceful */ });
-        }
+        console.log("[AccessFlags] подписка истекла (premium_until=" + flags.premiumUntil + ")");
       }
 
       var premiumChanged = curPremium !== effectivePremium;
@@ -2354,6 +2350,7 @@ loadFullState();
   } else {
     window.addEventListener("load", function () { setTimeout(function () { tick(1); }, 800); });
   }
+  window.syncUserAccessFlagsFromDB = function () { tick(1); };
 })();
 
 // REMINDERS — детект timezone браузера и запись в settings.tzOffsetMinutes.
@@ -11296,13 +11293,11 @@ function goalSwipeToIndex(idx, goLeft) {
    *
    * Правила:
    *   • isPremium=false → false (нет подписки).
-   *   • isPremium=true + premiumUntil=null → true (legacy lifetime).
    *   • isPremium=true + premiumUntil > now() → true (активная подписка).
    *   • isPremium=true + premiumUntil <= now() → false (подписка истекла).
    *
-   * Серверная очистка (premium_until < now → is_premium = false) идёт
-   * через syncUserAccessFlagsFromDB: при обнаружении истёкшей подписки
-   * клиент сам вызывает setUserPremium(false) для согласования с БД.
+   * Истёкшая подписка: локально effectivePremium=false; is_premium в БД
+   * обновляет webhook/cron (клиент не пишет premium-поля).
    *
    * Экспортируется как window.isPremiumActive для использования из других
    * IIFE и тестов из консоли разработчика.
@@ -11310,9 +11305,9 @@ function goalSwipeToIndex(idx, goLeft) {
   function isPremiumActive() {
     var s = (typeof getState === "function") ? getState() : (window.appState || {});
     if (s.isPremium !== true) return false;
-    if (!s.premiumUntil) return true; // legacy: бессрочный премиум
+    if (!s.premiumUntil) return false;
     var until = new Date(s.premiumUntil).getTime();
-    if (isNaN(until)) return true; // не парсится - считаем активным (graceful)
+    if (isNaN(until)) return false;
     return until > Date.now();
   }
 
@@ -11948,8 +11943,7 @@ function goalSwipeToIndex(idx, goLeft) {
   //      → бэкенд (Edge Function) дёргает Bot API createInvoiceLink (XTR, 150⭐)
   //      → возвращает invoice_url + payload.
   //   2. tg.openInvoice(invoice_url, callback).
-  //   3. callback("paid") → optimistic isPremium=true в appState + setUserPremium
-  //      в Supabase (страховка на случай задержки bot webhook'а), success-toast,
+  //   3. callback("paid") → optimistic isPremium в appState (до webhook), success-toast,
   //      конфетти, закрытие модалки, перерисовка UI.
   //   4. callback("cancelled"|"failed") → toast с пояснением, модалка остаётся.
   //   5. Параллельно - bot webhook (stars-payment-webhook) поставит is_premium
@@ -12073,12 +12067,11 @@ function goalSwipeToIndex(idx, goLeft) {
       showToast(t("payment.success.title") + " · " + t("payment.success.text"), "success", { duration: 3500 });
       setTimeout(function () { closePremiumModal(); }, 350);
 
-      // 5. Подстраховка серверная - клиент сам пишет is_premium=true в БД
-      //    (на случай, если webhook не настроен или задерживается).
-      if (typeof window.setUserPremium === "function") {
-        window.setUserPremium(true).catch(function (err) {
-          console.warn("[Stars] setUserPremium (fallback) failed:", err);
-        });
+      // Premium в БД выставляет только stars-payment-webhook (не клиент).
+      if (typeof window.syncUserAccessFlagsFromDB === "function") {
+        setTimeout(function () {
+          try { window.syncUserAccessFlagsFromDB(); } catch (e) { /* graceful */ }
+        }, 2000);
       }
     } catch (e) {
       console.error("[Stars] onStarsPaymentSucceeded exception:", e);
@@ -15317,6 +15310,27 @@ function renderFlexModelSummary() {
       lastCalc.monthlySave = 0;
     }
 
+    // ── 3b) Сброс накоплений прошлой цели (иначе factHistory «протекает» в новую) ──
+    factHistory = [];
+    accounts.main = 0;
+    accounts.reserve = 0;
+    initialBalance = 0;
+    planStartValue = 0;
+    factRatio = null;
+    plannedMonthly = 0;
+    if (typeof updateState === "function") {
+      updateState({
+        factHistory: [],
+        accounts: { main: 0, reserve: 0 },
+        initialBalance: 0,
+        planStartValue: 0,
+        factRatio: null,
+        plannedMonthly: 0,
+        chosenPlan: null,
+        isInitialized: false
+      });
+    }
+
     // ── 4) Закрываем модалку с анимацией + полный refresh UI ──
     ProtoSheet.close(sheet, overlay, {
       onClosed: function () {
@@ -15646,7 +15660,7 @@ function _isPremiumActiveForOnboarding() {
   }
   var s = (typeof getState === "function") ? getState() : (window.appState || {});
   if (!s || s.isPremium !== true) return false;
-  if (!s.premiumUntil) return true; // legacy lifetime
+  if (!s.premiumUntil) return false;
   var until = new Date(s.premiumUntil).getTime();
   return isFinite(until) && until > Date.now();
 }

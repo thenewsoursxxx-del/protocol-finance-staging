@@ -119,7 +119,7 @@ function buildReminderText(lang: "ru" | "en", endsAt: Date, daysLeft: number): s
       `   • Гибкая модель перестанет адаптироваться`,
       `   • Расширенные настройки портфеля заблокируются`,
       ``,
-      `Не теряй то, что уже стало частью твоего плана. Продли подписку всего за 400 ⭐ - и продолжай уверенно идти к цели.`,
+      `Не теряй то, что уже стало частью твоего плана. Продли подписку всего за 300 ⭐ - и продолжай уверенно идти к цели.`,
     ].join("\n");
   }
   return [
@@ -131,7 +131,7 @@ function buildReminderText(lang: "ru" | "en", endsAt: Date, daysLeft: number): s
     `   • Flexible model will stop adapting to you`,
     `   • Advanced portfolio settings will be locked`,
     ``,
-    `Don't lose what's already part of your plan. Renew for just 400 ⭐ - and keep moving toward your goal with confidence.`,
+    `Don't lose what's already part of your plan. Renew for just 300 ⭐ - and keep moving toward your goal with confidence.`,
   ].join("\n");
 }
 

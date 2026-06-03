@@ -30,8 +30,8 @@
 
 const BOT_TOKEN = Deno.env.get("TELEGRAM_BOT_TOKEN") || "";
 
-// Цена: 400 ⭐ за Premium на 30 дней.
-const STARS_PRICE = 400;
+// Цена: 300 ⭐ за Premium на 30 дней.
+const STARS_PRICE = 300;
 // 30 дней в секундах. ЕДИНСТВЕННОЕ значение, которое Telegram Stars
 // принимает для subscription_period в createInvoiceLink на 2026 год.
 const SUBSCRIPTION_PERIOD_SEC = 2592000;
@@ -104,14 +104,14 @@ Deno.serve(async (req) => {
   // поле не пришло, лучше НЕ списывать с пользователя автоматически).
   const autoRenew: boolean = body?.auto_renew === true;
 
-  if (typeof body?.init_data === "string" && body.init_data.length > 0) {
-    const v = await verifyInitData(body.init_data);
-    if (!v.ok) return json({ error: "init_data_invalid" }, 401);
-    if (v.userId && v.userId !== tgId) {
-      return json({ error: "telegram_id_mismatch" }, 401);
-    }
-  } else {
-    console.warn("[create-stars-invoice] init_data not provided — dev mode for tg_id=", tgId);
+  if (typeof body?.init_data !== "string" || body.init_data.length === 0) {
+    return json({ error: "init_data_required" }, 401);
+  }
+  const v = await verifyInitData(body.init_data);
+  if (!v.ok) return json({ error: "init_data_invalid" }, 401);
+  if (!v.userId) return json({ error: "init_data_user_missing" }, 401);
+  if (v.userId !== tgId) {
+    return json({ error: "telegram_id_mismatch" }, 401);
   }
 
   // Payload содержит auto_renew flag — webhook будет писать его в users.auto_renew.
@@ -125,7 +125,7 @@ Deno.serve(async (req) => {
   const invoiceBody: Record<string, unknown> = {
     title: "Protocol Premium",
     description: autoRenew
-      ? "Полный доступ ко всем функциям. Подписка с автопродлением — 150 ⭐ каждые 30 дней. Отмена в любой момент в настройках Telegram."
+      ? `Полный доступ ко всем функциям. Подписка с автопродлением — ${STARS_PRICE} ⭐ каждые 30 дней. Отмена в любой момент в настройках Telegram.`
       : "Полный доступ ко всем функциям приложения на 30 дней (одноразовая оплата).",
     payload,
     currency: "XTR",
@@ -133,7 +133,7 @@ Deno.serve(async (req) => {
   };
 
   // RECURRING BILLING — ключевое поле для subscription-invoice'а.
-  // Telegram автоматически списывает 400⭐ каждые 2592000 секунд (30 дней)
+  // Telegram автоматически списывает STARS_PRICE ⭐ каждые 2592000 секунд (30 дней)
   // и отправляет нам очередной successful_payment update.
   if (autoRenew) {
     invoiceBody.subscription_period = SUBSCRIPTION_PERIOD_SEC;

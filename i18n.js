@@ -451,7 +451,7 @@
       "premium.f5.title": "Статистика счёта",
       "premium.f5.text": "Переверни карточку счёта - и сможешь распределять накопления по инструментам: акции, наличные, вклады. Видь точное отражение своих вложенных накоплений.",
       "premium.buyBtn": "Оформить Premium",
-      "premium.price": "400 ⭐ / 30 дней",
+      "premium.price": "300 ⭐ / 30 дней",
       "premium.ctaHint": "Полный доступ ко всем функциям · 30 дней",
 
       // SUBSCRIPTION MODEL - чекбокс автопродления
@@ -1538,7 +1538,7 @@
       "premium.f5.title": "Account statistics",
       "premium.f5.text": "Flip the account card - and you'll be able to allocate savings across instruments: stocks, cash, deposits. See an accurate breakdown of your invested savings.",
       "premium.buyBtn": "Get Premium",
-      "premium.price": "400 ⭐ / 30 days",
+      "premium.price": "300 ⭐ / 30 days",
       "premium.ctaHint": "Full access to all features · 30 days",
 
       // SUBSCRIPTION MODEL - auto-renew checkbox

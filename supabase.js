@@ -832,10 +832,7 @@ window.fetchUserAccessFlags = fetchUserAccessFlags;
  *      Передаёт init_data (raw initData строка Telegram WebApp) для
  *      серверной верификации HMAC.
  *
- *   2. setUserPremium(value) — оптимистично проставляет users.is_premium=true
- *      ПОСЛЕ успешной оплаты (на случай, если bot webhook задерживается
- *      или не настроен). Серверная истина — за webhook'ом, но клиент тоже
- *      пишет в БД для немедленного UI-feedback.
+ *   2. setUserPremium — no-op (premium в БД только webhook / service_role).
  * ============================================================================ */
 async function createStarsInvoice(autoRenew) {
   // SUBSCRIPTION MODEL: invoice на 30 дней Premium.
@@ -980,33 +977,15 @@ async function triggerPremiumExpiredNotice() {
   return _callNotificationEndpoint("send-premium-expired-notice", "triggerPremiumExpiredNotice");
 }
 
+/**
+ * Premium в users меняется только на сервере (webhook / service_role).
+ * Клиентский UPDATE is_premium заблокирован триггером users_protect_premium_columns.
+ */
 async function setUserPremium(value) {
-  try {
-    if (!initSupabaseClient()) return false;
-    // RLS AUTH: UPDATE users.is_premium требует JWT с claim telegram_id.
-    if (!(await ensureAuthenticated())) {
-      console.warn("[Stars] setUserPremium: нет авторизации, пропускаем (webhook всё равно проставит is_premium).");
-      return false;
-    }
-    var identity = await getVerifiedUserIdentity();
-    if (!identity) return false;
-
-    var res = await supabaseClient
-      .from("users")
-      .update({ is_premium: !!value })
-      .eq("telegram_id", identity.telegram_id);
-
-    if (res.error) {
-      console.error("[Stars] setUserPremium ошибка:",
-        res.error.message, res.error.code || "");
-      return false;
-    }
-    console.log("[Stars] users.is_premium=" + !!value + " установлено клиентом");
-    return true;
-  } catch (e) {
-    console.error("[Stars] setUserPremium exception:", e && e.message);
-    return false;
-  }
+  console.warn(
+    "[Stars] setUserPremium(" + !!value + ") ignored — premium is server-managed only",
+  );
+  return false;
 }
 
 window.createStarsInvoice = createStarsInvoice;

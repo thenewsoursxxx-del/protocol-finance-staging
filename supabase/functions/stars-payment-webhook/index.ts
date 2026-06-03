@@ -53,6 +53,8 @@ const supabase = SUPABASE_URL && SERVICE_ROLE
 
 const PREMIUM_DAYS = 30;
 const PREMIUM_MS = PREMIUM_DAYS * 24 * 60 * 60 * 1000;
+// Должно совпадать с create-stars-invoice STARS_PRICE.
+const STARS_PRICE = 300;
 
 // COMMUNITY STATS — логирование каждого успешного платежа в stars_payments.
 // Идемпотентность гарантируется UNIQUE индексом по telegram_charge_id;
@@ -370,12 +372,14 @@ function buildRenewalKeyboard(lang: "ru" | "en") {
 Deno.serve(async (req: Request) => {
   if (req.method !== "POST") return new Response("method_not_allowed", { status: 405 });
 
-  if (WEBHOOK_SECRET) {
-    const got = req.headers.get("X-Telegram-Bot-Api-Secret-Token") || "";
-    if (got !== WEBHOOK_SECRET) {
-      console.warn("[stars-webhook] secret_token mismatch");
-      return new Response("forbidden", { status: 403 });
-    }
+  if (!WEBHOOK_SECRET) {
+    console.error("[stars-webhook] TELEGRAM_WEBHOOK_SECRET not configured");
+    return new Response("webhook_secret_not_configured", { status: 500 });
+  }
+  const got = req.headers.get("X-Telegram-Bot-Api-Secret-Token") || "";
+  if (got !== WEBHOOK_SECRET) {
+    console.warn("[stars-webhook] secret_token mismatch");
+    return new Response("forbidden", { status: 403 });
   }
 
   let update: any;
@@ -389,7 +393,9 @@ Deno.serve(async (req: Request) => {
       const isStars = q?.currency === "XTR";
       const payload: string = q?.invoice_payload || "";
       const validPayload = payload.startsWith("premium_");
-      if (isStars && validPayload) {
+      const totalAmount = (typeof q?.total_amount === "number") ? q.total_amount : 0;
+      const validAmount = totalAmount >= STARS_PRICE;
+      if (isStars && validPayload && validAmount) {
         await answerPreCheckoutQuery(q.id, true);
       } else {
         await answerPreCheckoutQuery(q.id, false, "Invalid invoice");
@@ -411,6 +417,29 @@ Deno.serve(async (req: Request) => {
       if (!payload.startsWith(expectedPrefix)) {
         console.warn("[stars-webhook] payload prefix mismatch:", payload);
         return new Response("OK");
+      }
+
+      const paymentAmount = (typeof sp.total_amount === "number") ? sp.total_amount : 0;
+      if (paymentAmount < STARS_PRICE) {
+        console.warn(
+          `[stars-webhook] underpayment tg=${fromId}, amount=${paymentAmount}, expected>=${STARS_PRICE}`,
+        );
+        return new Response("OK");
+      }
+
+      const chargeId = (typeof sp.telegram_payment_charge_id === "string")
+        ? sp.telegram_payment_charge_id
+        : null;
+      if (chargeId && supabase) {
+        const { data: existingPay } = await supabase
+          .from("stars_payments")
+          .select("id")
+          .eq("telegram_charge_id", chargeId)
+          .maybeSingle();
+        if (existingPay) {
+          console.log(`[stars-webhook] duplicate charge_id=${chargeId}, skip activation`);
+          return new Response("OK");
+        }
       }
 
       // SUBSCRIPTION MODEL — извлекаем флаг auto_renew и subscription_expiration_date.
@@ -443,10 +472,6 @@ Deno.serve(async (req: Request) => {
       // Поле amount берём из самой записи Telegram (sp.total_amount),
       // а не из захардкоженного STARS_PRICE — чтобы статистика выдержала
       // будущие изменения цены.
-      const paymentAmount = (typeof sp.total_amount === "number") ? sp.total_amount : 0;
-      const chargeId = (typeof sp.telegram_payment_charge_id === "string")
-        ? sp.telegram_payment_charge_id
-        : null;
       // fire-and-forget: не блокируем ответ Telegram'у — он ждёт быстрый OK.
       // Логирование в фоне; если упадёт — увидим только в логах функции.
       logStarsPayment({

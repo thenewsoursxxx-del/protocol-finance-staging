@@ -58,14 +58,29 @@ function getDefaultState() {
     incomeType: "fixed",
     expenseType: "fixed",
     frequency: "monthly",
-    incomeFrequency: "monthly",
-    expenseFrequency: "monthly",
+    // Частота периодичности изначально НЕ выбрана (""), чтобы при переключении
+    // на «Нефиксированный» ни одна кнопка не была подсвечена - пользователь
+    // выбирает сам. Расчётные пути используют запасной "monthly" (|| "monthly"),
+    // поэтому пустое значение безопасно. Существующие пользователи сохраняют
+    // свою сохранённую частоту (deep-merge в applyState).
+    incomeFrequency: "",
+    expenseFrequency: "",
     fixedIncomeAmount: "",
     fixedExpenseAmount: "",
     // NEW (v11): start date for periodic ("fixed") mode — YYYY-MM-DD or "".
     // Anchors the recurring schedule (weekly/biweekly/monthly).
     incomeStartDate: "",
     expenseStartDate: "",
+
+    // NEW (v16): дата (ISO) первой активации гибкой (cashflow) модели. Нужна,
+    // чтобы понять, начал ли пользователь копить в середине месяца (день ≥ 2)
+    // и показать ему один раз плашку «расход уже потрачен?». Ставится один раз.
+    cashflowStartedAt: "",
+    // NEW (v16): ответ пользователя на плашку про расход в неполном (стартовом)
+    // месяце. { monthKey:number, status:"yes"|"no"|"partial", paidAmount:number }.
+    // monthKey = year*12+month ответа; если месяц сменился — ответ считается
+    // неактуальным (новый месяц полный, плашка не нужна).
+    partialExpense: null,
 
     // ── Premium (v4 → v14: subscription model) ──
     isPremium: false,

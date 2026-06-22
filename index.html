@@ -190,11 +190,10 @@ viewport-fit=cover" />
         <div class="cf-fixed-hint-line" id="incomeFixedHintLine"></div>
         <div class="cf-fixed-hint-helper" data-i18n="flex.fixedSummary.helper">Используются данные, введённые при открытии гибкой модели</div>
       </div>
-      <!-- NEW: логика fixed vs variable 11.05.2026 - amount + start date appear ONLY in non-fixed (variable) mode -->
+      <!-- Сумма дохода вводится через карточку «+ Записать поступление» ниже -
+           отдельное поле суммы убрано, чтобы не дублировать ввод. В non-fixed
+           режиме здесь остаётся только дата старта периодического дохода. -->
       <div id="fixedIncomeWrap" class="cf-fixed-amount-wrap cf-nonfixed-wrap" style="display:none">
-        <div class="input-wrap">
-          <input id="fixedIncomeInput" type="text" inputmode="numeric" class="cf-amount-input" data-i18n-placeholder="flex.variable.amountPlaceholder.income" placeholder="Сумма дохода" />
-        </div>
         <div class="cf-startdate-row">
           <label for="incomeStartDate" class="cf-startdate-label" data-i18n="flex.variable.startDate.income">Дата первого поступления</label>
           <input id="incomeStartDate" type="date" class="cf-startdate-input" data-i18n-placeholder="flex.start.placeholder" />
@@ -203,7 +202,7 @@ viewport-fit=cover" />
       <div id="incomeFrequencySelector" class="frequency-selector" data-for="income">
         <div class="cf-freq-label" data-i18n="flex.freq.label.income">Как часто вы получаете доход?</div>
         <div class="freq-grid">
-          <button class="freq-btn active" data-freq="monthly" data-i18n="flex.freq.monthly">Ежемесячно</button>
+          <button class="freq-btn" data-freq="monthly" data-i18n="flex.freq.monthly">Ежемесячно</button>
           <button class="freq-btn" data-freq="weekly" data-i18n="flex.freq.weekly">Раз в неделю</button>
           <button class="freq-btn" data-freq="biweekly" data-i18n="flex.freq.biweekly">Раз в 2 нед.</button>
           <button class="freq-btn" data-freq="custom" data-i18n="flex.freq.custom">Свой график</button>
@@ -261,11 +260,10 @@ viewport-fit=cover" />
         <div class="cf-fixed-hint-line" id="expenseFixedHintLine"></div>
         <div class="cf-fixed-hint-helper" data-i18n="flex.fixedSummary.helper">Используются данные, введённые при открытии гибкой модели</div>
       </div>
-      <!-- NEW: логика fixed vs variable 11.05.2026 - amount + start date appear ONLY in non-fixed (variable) mode -->
+      <!-- Сумма расхода вводится через карточку «+ Записать расход» ниже -
+           отдельное поле суммы убрано, чтобы не дублировать ввод. В non-fixed
+           режиме здесь остаётся только дата старта периодического расхода. -->
       <div id="fixedExpenseWrap" class="cf-fixed-amount-wrap cf-nonfixed-wrap" style="display:none">
-        <div class="input-wrap">
-          <input id="fixedExpenseInput" type="text" inputmode="numeric" class="cf-amount-input" data-i18n-placeholder="flex.variable.amountPlaceholder.expense" placeholder="Сумма расхода" />
-        </div>
         <div class="cf-startdate-row">
           <label for="expenseStartDate" class="cf-startdate-label" data-i18n="flex.variable.startDate.expense">Дата первого расхода</label>
           <input id="expenseStartDate" type="date" class="cf-startdate-input" data-i18n-placeholder="flex.start.placeholder" />
@@ -274,7 +272,7 @@ viewport-fit=cover" />
       <div id="expenseFrequencySelector" class="frequency-selector" data-for="expense">
         <div class="cf-freq-label" data-i18n="flex.freq.label.expense">Как часто вы тратите деньги?</div>
         <div class="freq-grid">
-          <button class="freq-btn active" data-freq="monthly" data-i18n="flex.freq.monthly">Ежемесячно</button>
+          <button class="freq-btn" data-freq="monthly" data-i18n="flex.freq.monthly">Ежемесячно</button>
           <button class="freq-btn" data-freq="weekly" data-i18n="flex.freq.weekly">Раз в неделю</button>
           <button class="freq-btn" data-freq="biweekly" data-i18n="flex.freq.biweekly">Раз в 2 нед.</button>
           <button class="freq-btn" data-freq="custom" data-i18n="flex.freq.custom">Свой график</button>

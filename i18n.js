@@ -45,6 +45,10 @@
 
       // ── Plan summary ──
       "calc.factPlaceholder": "Сколько вы отложили",
+      // ── Cashflow record buttons (на экране графика, гибкая модель) ──
+      "graph.recordIncome": "Записать доход",
+      "graph.recordExpense": "Записать расход",
+      "graph.recordHint": "Записывайте доходы и расходы по мере поступления - Protocol сам отложит на цель. Чтобы сменить периодичность или сумму, откройте гибкую модель.",
       "plan.current": "Текущий план",
       "plan.perMonth": "/ месяц",
       "plan.approx": "Примерно",
@@ -60,6 +64,21 @@
       "plan.forecastExpense": "Прогноз расходов",
       "plan.accumulated": "Накоплено",
       "plan.remaining": "Осталось",
+      "plan.thisMonthOngoing": "в этом месяце · далее {ongoing}/мес",
+      "plan.thisMonthTag": "в этом месяце",
+      "plan.expensePaidNote": "в этом месяце уже оплачен",
+      "plan.expensePartialNote": "оплачено {paid} в этом месяце",
+
+      // ── Неполный стартовый месяц: плашка про расход ──
+      "cs.partialExpense.title": "Уточните расход за этот месяц",
+      "cs.partialExpense.q": "До конца месяца осталось {days} дн. Расход {amount}, который вы указали в гибкой модели, в этом месяце уже потрачен?",
+      "cs.partialExpense.yes": "Да, уже потрачен",
+      "cs.partialExpense.no": "Нет, ещё предстоит",
+      "cs.partialExpense.partial": "Потрачен частично",
+      "cs.partialExpense.partialLabel": "Сколько уже потрачено в этом месяце?",
+      "cs.partialExpense.partialPlaceholder": "Сумма",
+      "cs.partialExpense.save": "Сохранить",
+      "cs.partialExpense.hint": "Это нужно один раз — чтобы точно посчитать, сколько отложить в неполном первом месяце.",
 
       // ── Flexible model ──
       "flex.toggle": "Гибкая финансовая модель",
@@ -1047,6 +1066,15 @@
       "cs.toast.updated": "Запись обновлена",
       "cs.toast.invalidAmount": "Введите корректную сумму",
       "cs.toast.noGoal": "Сначала создайте цель - иначе не на что откладывать",
+      "cs.toast.noChange.income": "Доход не изменился. Меняйте здесь, только если сумма или периодичность изменились. Чтобы записать поступление - используйте кнопки на графике.",
+      "cs.toast.noChange.expense": "Расход не изменился. Меняйте здесь, только если сумма или периодичность изменились. Чтобы записать расход - используйте кнопки на графике.",
+      "cs.toast.planUpdated.income": "Готово - план пересчитан под новый доход",
+      "cs.toast.planUpdated.expense": "Готово - план пересчитан под новый расход",
+      "cs.modal.configTitle.income": "Настроить доход",
+      "cs.modal.configTitle.expense": "Настроить расход",
+      "cs.modal.configBtn": "Сохранить и пересчитать",
+      "cs.modal.configHint.income": "Укажите ожидаемый доход за период. Это настраивает план - деньги не откладываются. Фактические поступления записывайте кнопками на графике.",
+      "cs.modal.configHint.expense": "Укажите ожидаемый расход за период. Это настраивает план - фактические расходы записывайте кнопками на графике.",
       "cs.reminder.expenses.title": "Не забудьте ввести расходы",
       "cs.reminder.expenses.subtitle": "Запишите расходы за этот период, если они были - прогноз станет точнее.",
       "cs.reminder.expenses.cta": "Записать расход",
@@ -1136,6 +1164,11 @@
       "calc.resetPlan": "Start over",
       "calc.factPlaceholder": "How much did you save",
 
+      // ── Cashflow record buttons (graph screen, flexible model) ──
+      "graph.recordIncome": "Record income",
+      "graph.recordExpense": "Record expense",
+      "graph.recordHint": "Log income and expenses as they happen - Protocol sets aside toward your goal automatically. To change the frequency or amount, open the flexible model.",
+
       // ── Plan summary ──
       "plan.current": "Current plan",
       "plan.perMonth": "/ month",
@@ -1150,6 +1183,20 @@
       "plan.goalReachedIn": "Goal will be reached in approx.",
       "plan.forecastIncome": "Forecast income",
       "plan.forecastExpense": "Forecast expenses",
+      "plan.thisMonthOngoing": "this month · then {ongoing}/mo",
+      "plan.thisMonthTag": "this month",
+      "plan.expensePaidNote": "already paid this month",
+      "plan.expensePartialNote": "{paid} paid this month",
+
+      "cs.partialExpense.title": "Clarify this month's expense",
+      "cs.partialExpense.q": "{days} days left this month. The expense {amount} you set in the flexible model — has it already been spent this month?",
+      "cs.partialExpense.yes": "Yes, already spent",
+      "cs.partialExpense.no": "No, still due",
+      "cs.partialExpense.partial": "Partially spent",
+      "cs.partialExpense.partialLabel": "How much has been spent this month?",
+      "cs.partialExpense.partialPlaceholder": "Amount",
+      "cs.partialExpense.save": "Save",
+      "cs.partialExpense.hint": "One-time question — so we accurately compute how much to set aside in the partial first month.",
       "plan.accumulated": "Accumulated",
       "plan.remaining": "Remaining",
 
@@ -2131,6 +2178,15 @@
       "cs.toast.updated": "Entry updated",
       "cs.toast.invalidAmount": "Enter a valid amount",
       "cs.toast.noGoal": "Create a goal first - there's nothing to save toward yet",
+      "cs.toast.noChange.income": "Income hasn't changed. Use this only if the amount or frequency changed. To log actual income, use the buttons on the chart.",
+      "cs.toast.noChange.expense": "Expense hasn't changed. Use this only if the amount or frequency changed. To log actual expenses, use the buttons on the chart.",
+      "cs.toast.planUpdated.income": "Done - the plan was recalculated for the new income",
+      "cs.toast.planUpdated.expense": "Done - the plan was recalculated for the new expense",
+      "cs.modal.configTitle.income": "Set up income",
+      "cs.modal.configTitle.expense": "Set up expense",
+      "cs.modal.configBtn": "Save & recalculate",
+      "cs.modal.configHint.income": "Enter the expected income per period. This configures the plan - no money is set aside. Log actual income with the buttons on the chart.",
+      "cs.modal.configHint.expense": "Enter the expected expense per period. This configures the plan - log actual expenses with the buttons on the chart.",
       "cs.reminder.expenses.title": "Don't forget your expenses",
       "cs.reminder.expenses.subtitle": "Record this period's expenses if there were any - the forecast will be more accurate.",
       "cs.reminder.expenses.cta": "Record expense",

@@ -134,7 +134,11 @@
       expenses: Number(bc.expenses) || 0,
       saved: Number(bc.saved) || 0,
       mode: bc.mode || "calm",
-      hasReserve: !!bc.hasReserve
+      hasReserve: !!bc.hasReserve,
+      // Phase 2: ответ на плашку «расход уже потрачен?» в неполном стартовом месяце.
+      // null/"no" → расход целиком; "yes" → 0; "partial" → минус paidAmount.
+      currentMonthExpenseStatus: (bc.currentMonthExpenseStatus === "yes" || bc.currentMonthExpenseStatus === "no" || bc.currentMonthExpenseStatus === "partial") ? bc.currentMonthExpenseStatus : null,
+      currentMonthExpensePaidAmount: Number(bc.currentMonthExpensePaidAmount) || 0
     };
 
     this.events = Array.isArray(opts.events)
@@ -237,6 +241,52 @@
   }
 
   /**
+   * Календарно-точный подсчёт числа наступлений периодического события в
+   * конкретном календарном месяце (year, monthIndex), начиная с anchor-даты.
+   *   • monthly  → 1 (если месяц не раньше месяца старта) - месячная сумма всегда
+   *                полная (аренда и т.п. платится целиком даже в неполном месяце);
+   *   • weekly   → шаг 7 дней;
+   *   • biweekly → шаг 14 дней.
+   * Пример: недельный доход со стартом 21 июня даёт в июне 2 наступления (21 и 28).
+   * Используется для прогноза ТЕКУЩЕГО (возможно неполного) месяца.
+   */
+  function occurrencesInMonth(anchorDate, frequency, year, monthIndex) {
+    var anchor = (anchorDate instanceof Date) ? anchorDate : new Date(anchorDate);
+    if (isNaN(anchor.getTime())) return 0;
+    var a0 = new Date(anchor.getFullYear(), anchor.getMonth(), anchor.getDate());
+    var first = new Date(year, monthIndex, 1);
+    var last = new Date(year, monthIndex + 1, 0);
+    last.setHours(23, 59, 59, 999);
+    if (a0.getTime() > last.getTime()) return 0; // старт ещё не наступил
+
+    if (frequency === FREQUENCY.MONTHLY) return 1;
+
+    var step = frequency === FREQUENCY.WEEKLY ? 7
+             : frequency === FREQUENCY.BIWEEKLY ? 14
+             : 0;
+    if (step === 0) return 0;
+
+    // Первое наступление, попадающее в месяц (>= 1-го числа).
+    var startOcc;
+    if (a0.getTime() >= first.getTime()) {
+      startOcc = new Date(a0);
+    } else {
+      var diffDays = Math.round((first.getTime() - a0.getTime()) / 86400000);
+      var k = Math.ceil(diffDays / step);
+      startOcc = new Date(a0);
+      startOcc.setDate(startOcc.getDate() + k * step);
+    }
+    var count = 0;
+    var cur = new Date(startOcc);
+    // Внутри одного месяца итераций мало (<= 5 для weekly); setDate безопасен к DST.
+    while (cur.getTime() <= last.getTime()) {
+      count++;
+      cur.setDate(cur.getDate() + step);
+    }
+    return count;
+  }
+
+  /**
    * Builds a monthly forecast from actual event amounts.
    * Groups income/expense events by frequency,
    * averages amount per event, multiplies by expected events/month.
@@ -298,6 +348,49 @@
       hasIncomeData: hasIncomeData,
       hasExpenseData: hasExpenseData
     };
+  };
+
+  /**
+   * Календарно-точный прогноз ТЕКУЩЕГО (возможно неполного) месяца.
+   * В отличие от _getForecastFromEvents (усреднённый «полный месяц»: weekly ×4.33),
+   * здесь доход/расход = (число фактических наступлений в текущем календарном
+   * месяце) × сумма. Месячные события дают полную сумму; недельные/2-недельные -
+   * столько, сколько реально выпадает на месяц при их дне старта.
+   *
+   * anchor-дата берётся из meta.anchorDate (реальный день старта), т.к. startDate
+   * самого события снапнут на 1-е число месяца в normalizeEvent.
+   */
+  CashflowEngine.prototype._getCurrentMonthForecast = function (refDate) {
+    var now = (refDate instanceof Date) ? refDate : new Date();
+    var y = now.getFullYear();
+    var mo = now.getMonth();
+
+    var income = 0;
+    var expense = 0;
+
+    for (var i = 0; i < this.events.length; i++) {
+      var e = this.events[i];
+      if (e.type !== EVENT_TYPE.INCOME && e.type !== EVENT_TYPE.EXPENSE) continue;
+
+      var anchorRaw = (e.meta && e.meta.anchorDate) ? e.meta.anchorDate : e.startDate;
+      var add = 0;
+
+      if (e.frequency === FREQUENCY.ONCE) {
+        // one-time / custom-запись: учитываем, только если её дата в текущем месяце.
+        if (!(e.meta && e.meta.userCreated)) continue;
+        var od = (anchorRaw instanceof Date) ? anchorRaw : new Date(anchorRaw);
+        if (!isNaN(od.getTime()) && od.getFullYear() === y && od.getMonth() === mo) {
+          add = e.amount;
+        }
+      } else {
+        add = e.amount * occurrencesInMonth(anchorRaw, e.frequency, y, mo);
+      }
+
+      if (e.type === EVENT_TYPE.INCOME) income += add;
+      else expense += add;
+    }
+
+    return { income: Math.round(income), expense: Math.round(expense) };
   };
 
   // ─── recalculate() ────────────────────────────────────────
@@ -363,6 +456,28 @@
     var pace = PACE_MAP[bc.mode] || 0.6;
     var monthlySave = free > 0 ? Math.round(free * pace) : 0;
 
+    // Phase 1: календарно-точный прогноз текущего (неполного) месяца. Доход/расход
+    // считаются по фактическому числу наступлений в текущем месяце, а не по
+    // усреднённому ×4.33. monthlySave/free выше (steady) остаются для будущих
+    // месяцев и базы ETA - текущие значения добавляются отдельно (additive).
+    var cmForecast = this._getCurrentMonthForecast();
+
+    // Phase 2: остаток расхода в текущем месяце уточняется ответом пользователя
+    // на плашку «расход уже потрачен?» (currentMonthExpenseStatus):
+    //   "yes"     → расход в этом месяце уже оплачен → остаток 0;
+    //   "partial" → остаток = расход − уже потрачено (currentMonthExpensePaidAmount);
+    //   "no"/null → расход ещё предстоит целиком (без изменений).
+    var cmExpenseRemaining = cmForecast.expense;
+    var cmExpStatus = bc.currentMonthExpenseStatus;
+    if (cmExpStatus === "yes") {
+      cmExpenseRemaining = 0;
+    } else if (cmExpStatus === "partial") {
+      cmExpenseRemaining = Math.max(0, cmForecast.expense - (bc.currentMonthExpensePaidAmount || 0));
+    }
+
+    var cmFree = cmForecast.income - cmExpenseRemaining;
+    var cmSave = cmFree > 0 ? Math.round(cmFree * pace) : 0;
+
     var toGoal = monthlySave;
     var toReserve = 0;
     if (bc.hasReserve && monthlySave > 0) {
@@ -370,11 +485,26 @@
       toGoal = monthlySave - toReserve;
     }
 
+    // Phase 2: вклад текущего (возможно неполного) месяца в цель — по тем же
+    // правилам резерва, что и полный toGoal.
+    var cmToGoal = cmSave;
+    if (bc.hasReserve && cmSave > 0) {
+      cmToGoal = cmSave - Math.round(cmSave * 0.1);
+    }
+
     var remaining = Math.max(0, bc.goal - balances.goalBalance);
 
+    // Phase 2: ETA с учётом неполного первого месяца. Первый календарный месяц
+    // добавляет частичный cmToGoal, последующие — полный toGoal. Для ПОЛНОГО
+    // месяца (cmToGoal === toGoal) формула тождественна старой Math.ceil(remaining/toGoal),
+    // поэтому established-пользователи и полные месяцы не затрагиваются.
     var monthsLeft = 0;
-    if (remaining > 0 && toGoal > 0) {
-      monthsLeft = Math.ceil(remaining / toGoal) + balances.totalSkips;
+    if (remaining > 0) {
+      if (cmToGoal >= remaining) {
+        monthsLeft = 1 + balances.totalSkips;
+      } else if (toGoal > 0) {
+        monthsLeft = 1 + Math.ceil((remaining - cmToGoal) / toGoal) + balances.totalSkips;
+      }
     }
 
     var hasSufficientData = forecast.hasIncomeData;
@@ -400,6 +530,15 @@
       averageMonthlyContribution: toGoal,
       forecastIncome: forecast.monthlyIncome,
       forecastExpense: forecast.monthlyExpense,
+      // Phase 1/2: значения текущего (возможно неполного) календарного месяца.
+      // currentMonthExpense — ОСТАТОК расхода после ответа на плашку.
+      currentMonthIncome: cmForecast.income,
+      currentMonthExpense: cmExpenseRemaining,
+      currentMonthExpenseFull: cmForecast.expense,
+      currentMonthFree: cmFree,
+      currentMonthSave: cmSave,
+      currentMonthToGoal: cmToGoal,
+      isPartialMonth: cmSave !== monthlySave,
       hasIncomeData: forecast.hasIncomeData,
       hasExpenseData: forecast.hasExpenseData,
       timeline: null

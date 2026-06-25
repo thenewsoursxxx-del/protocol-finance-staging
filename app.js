@@ -1801,21 +1801,29 @@ function _monthKey(d) {
 // Ответ пользователя про расход — ТОЛЬКО если он относится к текущему
 // календарному месяцу. Иначе { status:null } — расход считается полным.
 function _partialExpenseForNow() {
-  var pe = state.partialExpense;
+  // ВАЖНО: cashflowStartedAt / partialExpense живут в appState (state-manager),
+  // а локальный const state хранит только UI-поля (goalTotal и т.п.). Читаем
+  // через getState(), иначе значение всегда undefined и плашка не работает.
+  var pe = (typeof getState === "function") ? getState().partialExpense : null;
   if (!pe || pe.status == null) return { status: null, paidAmount: 0 };
   if (pe.monthKey !== _monthKey(new Date())) return { status: null, paidAmount: 0 };
   return { status: pe.status, paidAmount: Number(pe.paidAmount) || 0 };
 }
+// Экспортируем для модуля «Свой график» (custom schedule IIFE), чтобы расчёт
+// свободных средств учитывал тот же ответ про неполный месяц, что и движок.
+window._partialExpenseForNow = _partialExpenseForNow;
 
 // true, если гибкая модель начата В ТЕКУЩЕМ месяце и со 2-го числа или позже
 // (месяц неполный) — условие показа плашки про расход в стартовом месяце.
 function _startedMidCurrentMonth() {
-  var iso = state.cashflowStartedAt;
+  // см. _partialExpenseForNow: читаем из appState, не из локального const state.
+  var iso = (typeof getState === "function") ? getState().cashflowStartedAt : "";
   if (!iso) return false;
   var d = new Date(iso);
   if (isNaN(d.getTime())) return false;
   return _monthKey(d) === _monthKey(new Date()) && d.getDate() >= 2;
 }
+window._startedMidCurrentMonth = _startedMidCurrentMonth;
 
 // Сохраняет ответ пользователя на плашку про расход и пересчитывает план/график.
 function _savePartialExpense(status, paidAmount) {
@@ -1842,10 +1850,30 @@ function updatePartialExpenseBanner() {
   var isCashflow = (s.financialModel === "cashflow");
   var answered = _partialExpenseForNow().status !== null;
   var expFull = (lastCalc && lastCalc.currentMonthExpenseFull) || 0;
+  // Fallback: у «своего графика» (доход custom) движок не наполняет
+  // currentMonthExpenseFull, пока нет данных о доходе - поэтому берём
+  // фиксированный месячный расход напрямую из state. Вопрос про неполный месяц
+  // относится к РЕГУЛЯРНОМУ расходу (fixed / variable-periodic), а не к custom.
+  var _expIsCustom = (s.expenseType === "variable") && ((s.expenseFrequency || "monthly") === "custom");
+  if (!expFull && !_expIsCustom) {
+    var _pf = (typeof parseFlexAmount === "function") ? parseFlexAmount : Number;
+    expFull = ((s.expenseType || "fixed") === "fixed")
+      ? (_pf(s.expenses) || 0)
+      : (_pf(s.fixedExpenseAmount) || 0);
+  }
   var onPrimaryGoal = (typeof activeGoalIndex === "undefined") || activeGoalIndex === 0;
   var show = isCashflow && onPrimaryGoal && _startedMidCurrentMonth() && expFull > 0 && !answered;
 
+  // Плашка занимает место кнопок «Записать доход/расход»: пока вопрос не решён,
+  // прячем строку записи и поле факта. После ответа renderProtocolAdviceGraph()
+  // перерисует экран → плашка скроется (answered), а кнопки появятся снова.
+  var recordRow = document.getElementById("cashflowRecordRow");
+  var factRow = document.querySelector(".fact-input-row");
+
   if (!show) { banner.style.display = "none"; return; }
+
+  if (recordRow) recordRow.style.display = "none";
+  if (factRow) factRow.style.display = "none";
 
   var now = new Date();
   var lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
@@ -1858,6 +1886,8 @@ function updatePartialExpenseBanner() {
       amount: ((typeof fmtNum === "function") ? fmtNum(expFull) : expFull) + " " + cs
     });
   }
+  var curEl = document.getElementById("csPartialExpenseCur");
+  if (curEl) curEl.textContent = cs;
   var pw = document.getElementById("csPartialExpensePartialWrap");
   if (pw) pw.style.display = "none";
   banner.style.display = "";
@@ -1889,7 +1919,10 @@ function recalcPlan() {
       // дату не ставим → плашка им не показывается. После «Начать сначала»
       // история очищается, поэтому новый неполный месяц учитывается корректно.
       var _noFactYet = !Array.isArray(factHistory) || factHistory.length === 0;
-      if (modelType === "cashflow" && !state.cashflowStartedAt && _noFactYet) {
+      // Читаем из appState (getState), а не из локального const state — иначе
+      // условие всегда истинно и дата старта перезаписывалась на каждом пересчёте.
+      var _alreadyStarted = (typeof getState === "function") ? getState().cashflowStartedAt : "";
+      if (modelType === "cashflow" && !_alreadyStarted && _noFactYet) {
         updateState({ cashflowStartedAt: new Date().toISOString() });
       }
       var _pe = _partialExpenseForNow();
@@ -2622,7 +2655,11 @@ window.ProtoSheet = {
     sheetEl.classList.remove("open");
     setTimeout(function () {
       if (overlayEl) overlayEl.style.display = "none";
-      showBottomNav();
+      // Навбар возвращаем ТОЛЬКО на основных вкладках. На экранах «Профиль»,
+      // «Настройки», «Расширенные» и пр. его быть не должно - иначе при закрытии
+      // шита (напр. «Сообщить о проблеме» из профиля) навбар ошибочно всплывал.
+      var _act = document.querySelector(".screen.active");
+      if (_act && SCREEN_TO_NAV_INDEX.hasOwnProperty(_act.id)) showBottomNav();
       if (opts.onClosed) opts.onClosed();
     }, 500);
   },
@@ -2759,6 +2796,12 @@ if (name === "advice" && typeof updatePartialExpenseBanner === "function") {
 // NEW: Full goal creation flow in Protocol tab - синхронизируем empty-state на Protocol
 if (name === "advice" && typeof window._syncProtocolEmptyState === "function") {
   try { window._syncProtocolEmptyState(); } catch (e) { /* noop */ }
+}
+
+// EARLY BIRDS - карточка акции «первые 500 = 15 дней Premium» (Фаза 1).
+// Показывается один раз за сессию новым пользователям при заходе на Protocol.
+if (name === "advice" && typeof maybeShowEarlyBirdCard === "function") {
+  try { maybeShowEarlyBirdCard(); } catch (e) { /* noop */ }
 }
 
 // FIX: goal completion UI - обновляем app-lock после смены экрана
@@ -3178,10 +3221,11 @@ ${adviceBlockHtml}
 </div>
 <div class="cs-partial-expense-partial" id="csPartialExpensePartialWrap" style="display:none">
 <label class="cs-pe-label" for="csPartialExpenseInput">${t("cs.partialExpense.partialLabel")}</label>
-<div class="cs-pe-input-row">
+<div class="cs-pe-field">
 <input id="csPartialExpenseInput" inputmode="numeric" placeholder="${t("cs.partialExpense.partialPlaceholder")}" />
-<button type="button" class="cs-pe-save" id="csPartialExpenseSave">${t("cs.partialExpense.save")}</button>
+<span class="cs-pe-field-cur" id="csPartialExpenseCur">₽</span>
 </div>
+<button type="button" class="cs-pe-save" id="csPartialExpenseSave">${t("cs.partialExpense.save")}</button>
 </div>
 <div class="cs-partial-expense-hint">${t("cs.partialExpense.hint")}</div>
 </div>
@@ -3245,6 +3289,15 @@ style="width:52px;height:52px;border-radius:50%">
 
     factInput.addEventListener("focus", () => {
       factInput.classList.remove("error", "shake");
+    });
+  }
+
+  // Плашка про неполный месяц: форматируем сумму в поле «потрачено частично»
+  // (разряды через пробел), чтобы крупное значение читалось премиально.
+  var peInput = document.getElementById("csPartialExpenseInput");
+  if (peInput) {
+    peInput.addEventListener("input", e => {
+      e.target.value = formatNumber(e.target.value);
     });
   }
 
@@ -3558,6 +3611,13 @@ function performFullReset() {
   // эти значения с ней совпадают; следующий синк лишь подтвердит их).
   if (_preservedPremium && typeof updateState === "function") {
     try { updateState(_preservedPremium); } catch (e) { /* graceful */ }
+  }
+
+  // Полный сброс гибкой модели (переменные замыкания + state + DOM). clearState()
+  // обнуляет appState, но переменные incomeType/частоты внутри initCashflowSettings
+  // остаются устаревшими — поэтому синхронизируем их явно.
+  if (typeof window._resetFlexibleModelUI === "function") {
+    try { window._resetFlexibleModelUI(); } catch (e) { /* graceful */ }
   }
 
   var flexContent = document.getElementById("flexibleContent");
@@ -4587,6 +4647,130 @@ function showToast(message, type, opts) {
   }, duration);
 }
 
+/* ============================================================================
+   EARLY BIRDS — карточка акции «первые 500 пользователей = 15 дней Premium».
+   ----------------------------------------------------------------------------
+   ФАЗА 1 (сейчас): счётчик косметический (статично 500/500), глобальный лимит
+   500 НЕ enforced на сервере (TEST_MODE=true в Edge Function). Грант премиума —
+   настоящий (15 дней). Источник правды «уже активировал» — таблица
+   early_bird_activations (удалив свою строку, можно протестировать повторно).
+   Показ один раз за сессию; перезапуск приложения снова попробует показать,
+   если активации нет.
+   ============================================================================ */
+var _earlyBirdShownThisSession = false;
+var _earlyBirdWired = false;
+
+function _closeEarlyBirdModal() {
+  var ov = document.getElementById("earlyBirdOverlay");
+  var md = document.getElementById("earlyBirdModal");
+  if (md) md.classList.remove("open");
+  if (ov) ov.classList.remove("open");
+  setTimeout(function () {
+    if (md) md.classList.add("hidden");
+    if (ov) ov.classList.add("hidden");
+    // Protocol — основная вкладка: возвращаем навбар, если она ещё активна.
+    if (typeof showBottomNav === "function") {
+      var act = document.querySelector(".screen.active");
+      if (act && act.id === "screen-advice") showBottomNav();
+    }
+  }, 340);
+}
+
+function _wireEarlyBird() {
+  if (_earlyBirdWired) return;
+  var md = document.getElementById("earlyBirdModal");
+  var actBtn = document.getElementById("earlyBirdActivateBtn");
+  var contBtn = document.getElementById("earlyBirdContinueBtn");
+  if (!md || !actBtn) return;
+  _earlyBirdWired = true;
+
+  actBtn.addEventListener("click", function () {
+    if (typeof haptic === "function") haptic("success");
+    actBtn.disabled = true;
+    var prevText = actBtn.textContent;
+    actBtn.textContent = t("earlyBird.activating");
+    Promise.resolve(
+      (typeof window.activateEarlyBird === "function")
+        ? window.activateEarlyBird()
+        : { ok: false }
+    ).then(function (r) {
+      if (r && r.ok) {
+        // Обновляем premium-статус из БД → разблокирует premium-UI.
+        if (typeof window.syncUserAccessFlagsFromDB === "function") {
+          window.syncUserAccessFlagsFromDB();
+        }
+        md.classList.add("eb-modal--activated");
+        if (typeof haptic === "function") haptic("success");
+      } else {
+        actBtn.disabled = false;
+        actBtn.textContent = prevText;
+        if (typeof showToast === "function") showToast(t("earlyBird.error"), "error");
+      }
+    }).catch(function () {
+      actBtn.disabled = false;
+      actBtn.textContent = prevText;
+      if (typeof showToast === "function") showToast(t("earlyBird.error"), "error");
+    });
+  });
+
+  if (contBtn) {
+    contBtn.addEventListener("click", function () {
+      if (typeof haptic === "function") haptic("light");
+      _closeEarlyBirdModal();
+    });
+  }
+
+  // Safety valve: тап по фону закрывает карточку (нет залипания навбара, если
+  // активация не удалась). Полноценной кнопки «Позже» при этом нет.
+  var ov = document.getElementById("earlyBirdOverlay");
+  if (ov) {
+    ov.addEventListener("click", function () { _closeEarlyBirdModal(); });
+  }
+}
+
+function _openEarlyBirdModal() {
+  var ov = document.getElementById("earlyBirdOverlay");
+  var md = document.getElementById("earlyBirdModal");
+  if (!ov || !md) return;
+  _wireEarlyBird();
+
+  // Сброс в дефолтное состояние (на случай повторного открытия в сессии).
+  md.classList.remove("eb-modal--activated");
+  var actBtn = document.getElementById("earlyBirdActivateBtn");
+  if (actBtn) { actBtn.disabled = false; actBtn.textContent = t("earlyBird.cta"); }
+  // ФАЗА 1: счётчик косметический — статично «500 / 500».
+  var cnt = document.getElementById("earlyBirdCounter");
+  if (cnt) cnt.textContent = t("earlyBird.counter", { n: 500, total: 500 });
+
+  ov.classList.remove("hidden");
+  md.classList.remove("hidden");
+  if (typeof hideBottomNav === "function") hideBottomNav();
+  requestAnimationFrame(function () {
+    ov.classList.add("open");
+    md.classList.add("open");
+  });
+  if (typeof haptic === "function") haptic("light");
+}
+
+function maybeShowEarlyBirdCard() {
+  try {
+    if (_earlyBirdShownThisSession) return;
+    if (!isInitialized || !chosenPlan) return;
+    var goals = (typeof getGoals === "function") ? getGoals() : [];
+    if (!goals || goals.length < 1) return;
+    if (typeof window.getEarlyBirdStatus !== "function") return;
+    window.getEarlyBirdStatus().then(function (st) {
+      // null = не авторизованы / нет данных → не показываем (попробуем позже).
+      if (!st) return;
+      if (st.activated) return;
+      if (_earlyBirdShownThisSession) return;
+      _earlyBirdShownThisSession = true;
+      _openEarlyBirdModal();
+    }).catch(function () { /* noop */ });
+  } catch (e) { /* noop */ }
+}
+window.maybeShowEarlyBirdCard = maybeShowEarlyBirdCard;
+
 function showFactTooltip({ value, onHide }) {
   const container = document.getElementById("factTooltipContainer");
   if (container) {
@@ -4631,7 +4815,16 @@ function computeMonthlyStatus() {
     return { required: 0, actual: 0, complete: false, show: false };
   }
 
+  // MULTI-GOAL: карточка основного счёта относится к ОСНОВНОЙ цели (factHistory
+  // "main" = goals[0]). Поэтому месячная норма здесь = доля основной цели, а не
+  // суммарный пул всех целей (plannedMonthly). Иначе «Внесено X / Y» показывало
+  // бы взносы основной цели против общего пула и никогда не «выполнено».
+  var _goalsMS = (typeof getGoals === "function") ? getGoals() : [];
+  var _isMultiMS = _goalsMS && _goalsMS.length > 1;
   var monthlyRequired = plannedMonthly || 0;
+  if (_isMultiMS && _goalsMS[0] && _goalsMS[0].monthlyShare != null) {
+    monthlyRequired = _goalsMS[0].monthlyShare || 0;
+  }
   if (monthlyRequired <= 0) {
     return { required: 0, actual: 0, complete: false, show: true };
   }
@@ -4640,8 +4833,9 @@ function computeMonthlyStatus() {
   // месячной нормы. «Внесено X / цель» и признак выполнения считаем по ней,
   // а внутреннюю кросс-месячную математику (previousRequired/кэпы прошлых
   // месяцев) оставляем на полной норме monthlyRequired, чтобы не ломать перенос.
+  // Для мульти-целей частичную логику не применяем (она для одной цели).
   var currentMonthRequired = monthlyRequired;
-  if (lastCalc && lastCalc.isPartialMonth
+  if (!_isMultiMS && lastCalc && lastCalc.isPartialMonth
       && lastCalc.currentMonthToGoal != null && lastCalc.currentMonthToGoal > 0) {
     currentMonthRequired = lastCalc.currentMonthToGoal;
   }
@@ -5350,8 +5544,10 @@ if (_cpInfo && _cpInfo.anyCustomActive) {
   // «Уже отложено полностью».
   var _showPending = _cpInfo.pendingDeposit > 0 ? _cpInfo.pendingDeposit : _cpInfo.targetDeposit;
   var _showFormatted = _cpInfo.pendingDeposit > 0 ? _cpInfo.pendingFormatted : _cpInfo.targetFormatted;
+  // fmtAmount/_amount уже добавляют символ валюты - второй раз _csSym не клеим
+  // (иначе в шапке дублировались «7 920 ₽ ₽»).
   monthlyEl.innerHTML =
-    t("cs.plan.title") + ': <b>' + _showFormatted + ' ' + _csSym + '</b>';
+    t("cs.plan.title") + ': <b>' + _showFormatted + '</b>';
 
   // Подсказка про counterpart (что было учтено в free).
   var _cp = _cpInfo.counterpart || { amount: 0, kind: "none" };
@@ -5388,28 +5584,27 @@ if (_cpInfo && _cpInfo.anyCustomActive) {
   // primary row: «Накоплено дохода» - главная сумма-источник.
   rowsHtml += '<div class="plan-cs-row plan-cs-row--primary">' +
                 '<span>' + t("cs.plan.totalIncome") + '</span>' +
-                '<b>' + _cpInfo.totalIncomeFormatted + ' ' + _csSym + '</b>' +
+                '<b>' + _cpInfo.totalIncomeFormatted + '</b>' +
               '</div>';
   rowsHtml += '<div class="plan-cs-counterpart">' + _cpLine + '</div>';
 
   if (_cpInfo.totalExpense > 0) {
     rowsHtml += '<div class="plan-cs-row">' +
                   '<span>' + t("cs.plan.totalExpense") + '</span>' +
-                  '<b>' + _cpInfo.totalExpenseFormatted + ' ' + _csSym + '</b>' +
+                  '<b>' + _cpInfo.totalExpenseFormatted + '</b>' +
                 '</div>';
     rowsHtml += '<div class="plan-cs-row">' +
                   '<span>' + t("cs.plan.free") + '</span>' +
-                  '<b>' + _cpInfo.freeFormatted + ' ' + _csSym + '</b>' +
+                  '<b>' + _cpInfo.freeFormatted + '</b>' +
                 '</div>';
   }
 
-  rowsHtml += '<div class="plan-cs-row">' +
-                '<span>' + t("cs.plan.depositedFromTotal") + '</span>' +
-                '<b>' + _cpInfo.alreadyFormatted + ' ' + _csSym + '</b>' +
-              '</div>';
+  // «Отложено от этой суммы» убрано: в большинстве случаев совпадает с
+  // «Отложено на цель» и путало. Оставляем один понятный счётчик — сколько
+  // всего на цели.
   rowsHtml += '<div class="plan-cs-row">' +
                 '<span>' + t("cs.plan.deposited") + '</span>' +
-                '<b>' + _cpInfo.goalSavedFormatted + ' ' + _csSym + '</b>' +
+                '<b>' + _cpInfo.goalSavedFormatted + '</b>' +
               '</div>';
   rowsHtml += '<div class="plan-cs-row">' +
                 '<span>' + t("cs.plan.term") + '</span>' +
@@ -5554,16 +5749,33 @@ if (_useCM && _peNow.status === "yes") {
 } else if (_useCM && _peNow.status === "partial") {
   _expLine += " · " + t("plan.expensePartialNote", { paid: fmtNum(_peNow.paidAmount) + " " + _cs2 });
 }
-// «Откладываете»: в неполном месяце показываем сумму текущего месяца + пометку.
-var _youSaveStrFinal = _incPartial
-  ? (fmtNum(_dispSave) + " " + _cs2 + " " + t("plan.thisMonthTag"))
-  : _youSaveStr;
+// «Откладываете»:
+//  • Гибкая модель + недельный / 2-недельный доход → показываем сумму ЗА ПЕРИОД
+//    (сколько отложить с каждого поступления), а месячную - в скобках.
+//    goalMonthlySave уже учитывает темп (pace); резерв - часть этой суммы.
+//  • Иначе (месячный доход / простая модель) - прежнее поведение
+//    (в неполном месяце - сумма текущего месяца + пометка).
+var _youSaveStrFinal;
+if (isCashflow && goalMonthlySave > 0 && (_incFreqNow === "weekly" || _incFreqNow === "biweekly")) {
+  var _ppMult = _incFreqNow === "weekly" ? 4.33 : 2.16;
+  var _ppLabel = _incFreqNow === "weekly" ? t("misc.perWeek") : t("misc.perBiweek");
+  var _ppAmount = Math.round(goalMonthlySave / _ppMult);
+  _youSaveStrFinal = fmtNum(_ppAmount) + " " + _cs2 + " " + _ppLabel
+    + " (" + fmtNum(goalMonthlySave) + " " + _cs2 + " " + t("pace.perMonth") + ")";
+} else {
+  _youSaveStrFinal = _incPartial
+    ? (fmtNum(_dispSave) + " " + _cs2 + " " + t("plan.thisMonthTag"))
+    : _youSaveStr;
+}
 
+// Гибкая модель: по просьбе убираем строки «Свободно в месяц» и
+// «Это ~X% от свободных средств» (меньше текста, фокус на «за период»).
+// В простой модели обе строки сохраняются.
 var explainText = lastCalc.ok
   ? (isCashflow ? _incLine + "\n" + _expLine + "\n" : "")
-    + t("plan.freePerMonth") + ": " + fmtNum(_dispFree) + " " + _cs2 + "\n"
+    + (isCashflow ? "" : (t("plan.freePerMonth") + ": " + fmtNum(_dispFree) + " " + _cs2 + "\n"))
     + t("plan.youSave") + ": " + _youSaveStrFinal + "\n"
-    + t("plan.paceOfFree", { pct: pctVal }) + "\n"
+    + (isCashflow ? "" : (t("plan.paceOfFree", { pct: pctVal }) + "\n"))
     + t("plan.goalReachedIn") + " " + goalMonthsLeft + " " + t("misc.monthShort")
   : t("engine.noBalance");
 explainEl.innerHTML = explainText.replace(/\n/g, "<br>");
@@ -6211,21 +6423,14 @@ function syncFlexibleUI() {
 
   if (typeof renderFlexModelSummary === "function") renderFlexModelSummary();
 
-  // CUSTOM SCHEDULE LOGIC - синхронизируем видимость нового блока «Свой график»
-  // и перерендериваем его сводку/историю (сюда попадаем из recalcPlan на любое
-  // изменение state, поэтому summary всегда актуален: последняя сумма, отложено,
-  // примерный срок до цели).
-  var sCustom = (typeof getState === "function") ? getState() : {};
+  // CUSTOM SCHEDULE LOGIC - карточка «Накоплено/История поступлений» в экране
+  // настройки УБРАНА: запись нерегулярных поступлений «Свой график» теперь
+  // полностью на вкладке с графиком (кнопки «Записать доход/расход»). Поэтому
+  // в настройке блок всегда скрыт - чтобы не дублировать ввод и не путать.
   var incCb = document.getElementById("incomeCustomBlock");
   var expCb = document.getElementById("expenseCustomBlock");
-  var incIsCustom = (sCustom.incomeType === "variable") && ((sCustom.incomeFrequency || "monthly") === "custom");
-  var expIsCustom = (sCustom.expenseType === "variable") && ((sCustom.expenseFrequency || "monthly") === "custom");
-  if (incCb) incCb.style.display = incIsCustom ? "flex" : "none";
-  if (expCb) expCb.style.display = expIsCustom ? "flex" : "none";
-  if (typeof window.renderCustomSchedule === "function") {
-    if (incIsCustom) window.renderCustomSchedule("income");
-    if (expIsCustom) window.renderCustomSchedule("expense");
-  }
+  if (incCb) incCb.style.display = "none";
+  if (expCb) expCb.style.display = "none";
 }
 
 /**
@@ -6593,23 +6798,23 @@ function initCashflowSettings() {
     //   • non-custom (monthly/weekly/biweekly) - CONFIGURE-режим: настраиваем
     //     прогноз (сумма + частота), без записи факта и без отложения. Повтор
     //     той же суммы при той же частоте - отклоняется с подсказкой.
-    //   • custom («свой график») - record-режим: добавление отдельного события.
-    if (typeof window.openCustomScheduleSheet === "function") {
+    //   • custom («свой график») - модалку НЕ открываем. Это нерегулярный доход
+    //     без фиксированной суммы и дат: пользователь записывает каждое
+    //     поступление (дата + сумма) на вкладке с графиком кнопкой «Записать
+    //     доход/расход», а приложение строит предположительный прогноз по этим
+    //     ручным вводам. Здесь только фиксируем выбор периодичности.
+    if (freq !== "custom" && typeof window.openCustomScheduleSheet === "function") {
       // Открываем модалку только если type=variable (для variable-side ввод имеет
       // смысл; для fixed-side частота меняется через свои элементы UI).
       var sNow = (typeof getState === "function") ? getState() : {};
       var sideType = forIncome ? (sNow.incomeType || "fixed") : (sNow.expenseType || "fixed");
       if (sideType === "variable") {
-        if (freq === "custom") {
-          window.openCustomScheduleSheet(sideLabel, { frequency: freq });
-        } else {
-          window.openCustomScheduleSheet(sideLabel, {
-            frequency: freq,
-            configure: true,
-            prevFreq: prevFreq,
-            prevAmount: prevAmount
-          });
-        }
+        window.openCustomScheduleSheet(sideLabel, {
+          frequency: freq,
+          configure: true,
+          prevFreq: prevFreq,
+          prevAmount: prevAmount
+        });
       }
     }
   }
@@ -6643,28 +6848,16 @@ function initCashflowSettings() {
 
   function updateMonthDaysVisibility(freq, type) {
     var wrap = type === "income" ? incomeMonthDaysWrap : expenseMonthDaysWrap;
-    var sideType = type === "income"
-      ? (getState().incomeType || "fixed")
-      : (getState().expenseType || "fixed");
-    // UNIFIED CUSTOM SCHEDULE FLOW - блок ручного ввода `.custom-schedule-block`
-    // теперь виден для ВСЕХ variable-периодичностей (weekly / biweekly / monthly
-    // / custom), потому что единая модалка «Записать поступление» создаёт запись
-    // в customScheduleEntries при любой частоте. Так пользователь видит полную
-    // историю вводов и reminder'ы независимо от выбранного freq.
-    var shouldShow = (sideType === "variable");
-    // CUSTOM SCHEDULE LOGIC - старый picker дней месяца полностью заменён
-    // блоком ручного ввода `.custom-schedule-block`. Прежний wrap скрыт всегда,
-    // чтобы не путать пользователя двумя UI одновременно. Сам элемент оставлен
-    // в DOM для обратной совместимости с прежними listener'ами setupMonthDaysDateInput.
+    // CUSTOM SCHEDULE LOGIC - старый picker дней месяца полностью заменён;
+    // прежний wrap скрыт всегда. Сам элемент оставлен в DOM для совместимости
+    // с прежними listener'ами setupMonthDaysDateInput.
     if (wrap) wrap.style.display = "none";
+    // CUSTOM SCHEDULE LOGIC - карточка ручного ввода/истории в экране настройки
+    // больше не показывается: запись поступлений «Свой график» перенесена на
+    // вкладку с графиком. Здесь всегда скрываем блок.
     var customBlockId = type === "income" ? "incomeCustomBlock" : "expenseCustomBlock";
     var customBlock = document.getElementById(customBlockId);
-    if (customBlock) {
-      customBlock.style.display = shouldShow ? "flex" : "none";
-      if (shouldShow && typeof window.renderCustomSchedule === "function") {
-        window.renderCustomSchedule(type);
-      }
-    }
+    if (customBlock) customBlock.style.display = "none";
   }
 
   // NEW: логика fixed vs variable 11.05.2026 - thin wrapper around the module-level
@@ -6687,6 +6880,52 @@ function initCashflowSettings() {
     var btns = block.querySelectorAll(".freq-btn");
     for (var i = 0; i < btns.length; i++) btns[i].classList.toggle("active", btns[i].dataset.freq === value);
   }
+
+  // GOAL COMPLETION / RESET: полный сброс гибкой модели — переменные замыкания
+  // (incomeType/expenseType/частоты), поля state И DOM. Нужен, чтобы новая цель
+  // после завершения предыдущей стартовала с чистой моделью (баг: данные гибкой
+  // модели «протекали» в новую цель), а плашка про неполный месяц снова
+  // показывалась (сбрасываем cashflowStartedAt + partialExpense).
+  window._resetFlexibleModelUI = function () {
+    incomeType = "fixed";
+    expenseType = "fixed";
+    incomeFrequency = "";
+    expenseFrequency = "";
+    if (typeof updateState === "function") {
+      updateState({
+        incomeType: "fixed",
+        expenseType: "fixed",
+        incomeFrequency: "",
+        expenseFrequency: "",
+        fixedIncomeAmount: "",
+        fixedExpenseAmount: "",
+        incomeStartDate: "",
+        expenseStartDate: "",
+        incomeMonthDays: [],
+        expenseMonthDays: [],
+        financialModel: "simple",
+        cashflowEvents: [],
+        customScheduleEntries: [],
+        customScheduleExpensePrompt: false,
+        customScheduleIncomePrompt: false,
+        cashflowStartedAt: "",
+        partialExpense: null
+      });
+    }
+    syncToggleUI(incomeToggle, "fixed");
+    syncToggleUI(expenseToggle, "fixed");
+    syncSideUIVisibility("fixed", "fixed");
+    syncFreqUIBlock(incomeFreqBlock, "");
+    syncFreqUIBlock(expenseFreqBlock, "");
+    if (fixedIncomeInput) fixedIncomeInput.value = "";
+    if (fixedExpenseInput) fixedExpenseInput.value = "";
+    if (incomeStartDateInput) incomeStartDateInput.value = "";
+    if (expenseStartDateInput) expenseStartDateInput.value = "";
+    updateMonthDaysVisibility("", "income");
+    updateMonthDaysVisibility("", "expense");
+    if (flexContent) flexContent.classList.remove("open");
+    if (flexToggle) flexToggle.classList.remove("open");
+  };
 }
 
 /* ===== EVENT EDITOR ===== */
@@ -7112,13 +7351,23 @@ initCashflowSettings();
       expenseKind = totalExpense > 0 ? "customTotal" : "none";
     } else {
       var eType = s.expenseType || "fixed";
-      if (eType === "fixed") {
-        totalExpense = parser(s.expenses);
-        expenseKind = totalExpense > 0 ? "fixed" : "none";
-      } else {
-        totalExpense = parser(s.fixedExpenseAmount);
-        expenseKind = totalExpense > 0 ? "variablePeriodic" : "none";
+      var _fullExp = (eType === "fixed") ? parser(s.expenses) : parser(s.fixedExpenseAmount);
+      // Неполный стартовый месяц: учитываем ответ на плашку «расход уже
+      // потрачен?» (паритет с CashflowEngine): yes → 0, partial → остаток,
+      // no / нет ответа → полный расход. Так «Свой график» считает свободные
+      // средства так же, как регулярные частоты.
+      totalExpense = _fullExp;
+      var _smFn = window._startedMidCurrentMonth;
+      if (typeof _smFn === "function" && _smFn()) {
+        var _peFn = window._partialExpenseForNow;
+        var _pe = (typeof _peFn === "function") ? _peFn() : { status: null, paidAmount: 0 };
+        if (_pe.status === "yes") {
+          totalExpense = 0;
+        } else if (_pe.status === "partial") {
+          totalExpense = Math.max(0, _fullExp - (Number(_pe.paidAmount) || 0));
+        }
       }
+      expenseKind = totalExpense > 0 ? (eType === "fixed" ? "fixed" : "variablePeriodic") : "none";
     }
 
     var free = Math.max(0, totalIncome - totalExpense);
@@ -7605,19 +7854,106 @@ initCashflowSettings();
     periodDate.setDate(1);
     periodDate.setHours(0, 0, 0, 0);
 
-    if (typeof factHistory !== "undefined" && Array.isArray(factHistory)) {
-      factHistory.push({
-        value: depositAmount,
-        date: periodDate,
-        to: "main",
-        timestamp: realTimestamp
-      });
+    // ── MULTI-GOAL: распределяем отложение по приоритету целей ──────────────
+    // Зеркало applyFact (простая модель): сперва резерв (план «буфер» = 10%),
+    // затем остаток делится между активными целями по весам приоритета.
+    // Доля основной цели идёт в factHistory("main"), доли вторичных целей —
+    // в g.saved. Раньше всё уходило только на основной счёт, поэтому вторые
+    // цели не пополнялись из гибкой модели.
+    var toReserve = 0;
+    var distributable = depositAmount;
+    // DEBT PARITY: как в applyFact — если включён режим погашения долгов, сначала
+    // автопогашение, затем остаток в резерв/цели. Раньше гибкая модель долги
+    // игнорировала, поэтому простая и гибкая модели расходились.
+    var debtRepaid = 0;
+    var repayResult = null;
+    var _csD = (typeof getState === "function") ? getState() : {};
+    if (_csD && _csD.debtPlanningMode && typeof applyAutoDebtRepayment === "function") {
+      repayResult = applyAutoDebtRepayment(distributable);
+      debtRepaid = (repayResult && repayResult.applied) || 0;
+      distributable = distributable - debtRepaid;
     }
-    if (typeof accounts !== "undefined" && accounts) {
-      accounts.main = (Number(accounts.main) || 0) + depositAmount;
+    if (typeof chosenPlan !== "undefined" && chosenPlan === "buffer") {
+      toReserve = Math.round(distributable * 0.1);
+      distributable = distributable - toReserve;
     }
 
-    // Обновим запись в журнале.
+    var goals = (typeof getGoals === "function") ? getGoals() : null;
+    var alloc = (goals && typeof allocateFactByPriority === "function")
+      ? allocateFactByPriority(goals, distributable)
+      : null;
+
+    var allocatedAny = false;
+    if (alloc && alloc.length) {
+      alloc.forEach(function (a) {
+        if (!a || a.amount <= 0) return;
+        var g = (typeof getGoalById === "function") ? getGoalById(a.goalId) : null;
+        if (!g) return;
+        allocatedAny = true;
+        var isPrimary = (g.priority === 1) || (goals.indexOf(g) === 0);
+        if (isPrimary) {
+          if (typeof factHistory !== "undefined" && Array.isArray(factHistory)) {
+            factHistory.push({ value: a.amount, date: periodDate, to: "main", timestamp: realTimestamp });
+          }
+          if (typeof accounts !== "undefined" && accounts) {
+            accounts.main = (Number(accounts.main) || 0) + a.amount;
+          }
+        } else {
+          g.saved = (Number(g.saved) || 0) + a.amount;
+        }
+      });
+      if (allocatedAny) {
+        if (typeof computeGoalsAllocation === "function") {
+          computeGoalsAllocation(goals, plannedMonthly || 0);
+        }
+        if (typeof persistGoals === "function") persistGoals(goals);
+      }
+    }
+
+    // Fallback: целей через getGoals нет (или распределить не удалось) —
+    // прежнее поведение: весь распределяемый остаток на основной счёт.
+    // distributable может быть 0, если всё ушло на долги/резерв — тогда ничего
+    // не пишем в журнал основного счёта.
+    if (!allocatedAny && distributable > 0) {
+      if (typeof factHistory !== "undefined" && Array.isArray(factHistory)) {
+        factHistory.push({ value: distributable, date: periodDate, to: "main", timestamp: realTimestamp });
+      }
+      if (typeof accounts !== "undefined" && accounts) {
+        accounts.main = (Number(accounts.main) || 0) + distributable;
+      }
+    }
+
+    if (toReserve > 0) {
+      if (typeof factHistory !== "undefined" && Array.isArray(factHistory)) {
+        factHistory.push({ value: toReserve, date: periodDate, to: "reserve", timestamp: realTimestamp });
+      }
+      if (typeof accounts !== "undefined" && accounts) {
+        accounts.reserve = (Number(accounts.reserve) || 0) + toReserve;
+      }
+    }
+
+    // DEBT PARITY: журналируем автопогашение и обновляем UI долгов (как applyFact).
+    if (debtRepaid > 0) {
+      var _savingsPart = depositAmount - debtRepaid;
+      if (repayResult && repayResult.details && typeof addDebtPaymentRecord === "function") {
+        repayResult.details.forEach(function (d) {
+          addDebtPaymentRecord({
+            debtId: d.debtId,
+            amount: d.amount,
+            source: "auto",
+            totalInput: depositAmount,
+            savingsPart: _savingsPart
+          });
+        });
+      }
+      if (typeof renderDebtSummaryGlobal === "function") renderDebtSummaryGlobal();
+      if (typeof renderDebtListGlobal === "function") renderDebtListGlobal();
+      if (typeof showToast === "function") showToast(t("toast.debtRepaid"), "success");
+      if (typeof showDebtBreakdown === "function") showDebtBreakdown(depositAmount, debtRepaid, _savingsPart);
+    }
+
+    // Обновим запись в журнале (deposited = полная сумма отложения за период,
+    // включая доли вторичных целей и резерв).
     var arr = _entries();
     for (var i = 0; i < arr.length; i++) {
       if (arr[i].id === entry.id) {
@@ -7652,6 +7988,28 @@ initCashflowSettings();
   // отрисовываются. Делаем это только если активен экран графика, чтобы не
   // дёргать nav-состояние при записи с экрана расчёта.
   function _refreshGraphAfterRecord() {
+    // MULTI-GOAL: завершение целей после отложения из гибкой модели — зеркало
+    // applyFact (простая модель). Основная цель → модалка завершения; вторичные
+    // (saved >= amount) → архивируются через checkGoalCompletion. Раньше из
+    // гибкой модели цель достигалась, но не закрывалась и модалка не появлялась.
+    try {
+      var _goalTotal = (typeof parseNumber === "function" && typeof goalInput !== "undefined" && goalInput)
+        ? parseNumber(goalInput.value || "0") : 0;
+      if (typeof goalCompleted !== "undefined" && !goalCompleted && _goalTotal > 0
+          && typeof accounts !== "undefined" && accounts && (accounts.main || 0) >= _goalTotal) {
+        goalCompleted = true;
+        var _snap = {
+          name: (typeof goalMeta !== "undefined" && goalMeta && goalMeta.title) ? goalMeta.title : t("misc.defaultGoalTitle"),
+          amount: _goalTotal,
+          saved: accounts.main
+        };
+        if (typeof showGoalCompletionModal === "function") {
+          setTimeout(function () { showGoalCompletionModal(_snap); }, 350);
+        }
+      }
+      if (typeof checkGoalCompletion === "function") checkGoalCompletion();
+    } catch (e) { /* graceful */ }
+
     var sc = document.querySelector(".screen.active");
     var onAdvice = sc && sc.id === "screen-advice";
     if (onAdvice && typeof renderProtocolAdviceGraph === "function") {
@@ -7663,6 +8021,12 @@ initCashflowSettings();
     } else if (typeof updatePlanHeader === "function") {
       updatePlanHeader();
     }
+    // MULTI-GOAL: после отложения вторичные цели меняют saved/monthlyShare —
+    // обновляем карточки целей и счетов, чтобы прогресс был виден сразу.
+    if (typeof renderGoals === "function") { try { renderGoals(); } catch (e) {} }
+    if (typeof renderAccountsUI === "function") { try { renderAccountsUI(); } catch (e) {} }
+    if (typeof updateAccountsLocalNav === "function") { try { updateAccountsLocalNav(); } catch (e) {} }
+    if (typeof updateGraphGoalIndicator === "function") { try { updateGraphGoalIndicator(); } catch (e) {} }
   }
 
   // ── Events: Continue / Deposit / Skip / History clicks ────────────────────
@@ -13901,14 +14265,55 @@ function goalSwipeToIndex(idx, goLeft) {
     return { key: last.key, name: t("cat." + last.key), color: last.color };
   }
 
-  function getMonthlyExpenseLimit() {
-    var inp = document.getElementById("expenses");
-    if (!inp || !inp.value) {
-      var s = getState();
-      if (s.expenses) return Number(String(s.expenses).replace(/\./g, "")) || 0;
-      return 0;
+  // Возвращает { limit, configured }:
+  //   • limit       — месячный лимит расходов (число для сравнения с тратами);
+  //   • configured  — задан ли лимит вообще. Нужен отдельно от limit, т.к. в
+  //                   гибкой модели лимит может стать 0 (расход уже полностью
+  //                   потрачен в неполном месяце) — это «лимит исчерпан», а не
+  //                   «лимит не задан».
+  function getExpenseLimitInfo() {
+    var s = getState();
+    // ── Гибкая модель ──────────────────────────────────────────────────────
+    // В гибком режиме нефиксированный расход хранится не в поле простой модели
+    // (#expenses / state.expenses), а в карточках периодичности. Лимит берём из
+    // того, что движок уже посчитал:
+    //   • неполный стартовый месяц → currentMonthExpense — расход именно этого
+    //     месяца, пропорциональный числу наступлений И уменьшенный ответом на
+    //     плашку «расход уже потрачен?» (yes→0, partial→остаток, no→полный);
+    //   • обычный (полный) месяц → forecastExpense (месячный расход, нормализованный).
+    if (s.financialModel === "cashflow") {
+      var ds = s.derivedState;
+      if (ds) {
+        var full = Number(ds.currentMonthExpenseFull) || 0;
+        var steady = Number(ds.forecastExpense) || 0;
+        if (ds.isPartialMonth && full > 0) {
+          var rem = Number(ds.currentMonthExpense);
+          if (isNaN(rem) || rem < 0) rem = full;
+          return { limit: rem, configured: true };
+        }
+        if (steady > 0) return { limit: steady, configured: true };
+        if (full > 0) return { limit: full, configured: true };
+      }
+      // Запасной вариант: фиксированный месячный расход лежит в state.expenses.
+      if ((s.expenseType || "fixed") === "fixed") {
+        var fx = Number(String(s.expenses || "").replace(/\./g, "")) || 0;
+        if (fx > 0) return { limit: fx, configured: true };
+      }
+      return { limit: 0, configured: false };
     }
-    return Number(inp.value.replace(/\./g, "")) || 0;
+    // ── Простая модель ─────────────────────────────────────────────────────
+    var inp = document.getElementById("expenses");
+    var lim;
+    if (!inp || !inp.value) {
+      lim = s.expenses ? (Number(String(s.expenses).replace(/\./g, "")) || 0) : 0;
+    } else {
+      lim = Number(inp.value.replace(/\./g, "")) || 0;
+    }
+    return { limit: lim, configured: lim > 0 };
+  }
+
+  function getMonthlyExpenseLimit() {
+    return getExpenseLimitInfo().limit;
   }
 
   function getCurrentMonthKey() {
@@ -14041,7 +14446,9 @@ function goalSwipeToIndex(idx, goLeft) {
   window.renderExpensesScreen = function () {
     var entries = getMonthExpenses();
     var data = calcCategoryTotals(entries);
-    var limit = getMonthlyExpenseLimit();
+    var limitInfo = getExpenseLimitInfo();
+    var limit = limitInfo.limit;
+    var hasLimit = limitInfo.configured;
     var spent = data.totalSpent;
     var remaining = limit - spent;
 
@@ -14074,7 +14481,7 @@ function goalSwipeToIndex(idx, goLeft) {
     if (elAddBtn) elAddBtn.style.display = "";
 
     if (elSpent) elSpent.textContent = fmtConverted(spent);
-    if (elLimit) elLimit.textContent = limit > 0 ? fmtConverted(limit) : "-";
+    if (elLimit) elLimit.textContent = hasLimit ? fmtConverted(limit) : "-";
 
     if (remaining >= 0) {
       if (elRemaining) elRemaining.textContent = fmtConverted(remaining);
@@ -14082,17 +14489,17 @@ function goalSwipeToIndex(idx, goLeft) {
       if (elRemaining) elRemaining.textContent = "−" + fmtConverted(Math.abs(remaining));
     }
 
-    var pct = limit > 0 ? Math.min((spent / limit) * 100, 100) : 0;
+    var pct = limit > 0 ? Math.min((spent / limit) * 100, 100) : (hasLimit && spent > 0 ? 100 : 0);
     if (elProgress) {
       elProgress.style.width = pct + "%";
       elProgress.classList.remove("warn", "over");
-      if (limit > 0 && spent > limit) elProgress.classList.add("over");
+      if (hasLimit && spent > limit) elProgress.classList.add("over");
       else if (limit > 0 && pct >= 80) elProgress.classList.add("warn");
     }
 
     if (elStatus) {
       elStatus.classList.remove("status-ok", "status-warn", "status-over");
-      if (limit <= 0) {
+      if (!hasLimit) {
         elStatus.textContent = t("expenses.noLimit");
         elStatus.classList.add("status-warn");
       } else if (spent > limit) {
@@ -14336,18 +14743,20 @@ function goalSwipeToIndex(idx, goLeft) {
     for (var k = 0; k < allMonth.length; k++) totalAllSpent += allMonth[k].amount;
     var pctOfTotal = totalAllSpent > 0 ? Math.round((catTotal / totalAllSpent) * 100) : 0;
 
-    var limit = getMonthlyExpenseLimit();
+    var catLimitInfo = getExpenseLimitInfo();
+    var limit = catLimitInfo.limit;
+    var hasLimit = catLimitInfo.configured;
     if (metaEl) {
       var metaParts = [];
       metaParts.push(t("expenses.pctOfAll", { pct: pctOfTotal }));
-      if (limit > 0) metaParts.push(t("expenses.ofTotal", { amount: fmtConverted(catTotal), limit: fmtConverted(limit), sym: getCurrencySymbol() }));
+      if (hasLimit) metaParts.push(t("expenses.ofTotal", { amount: fmtConverted(catTotal), limit: fmtConverted(limit), sym: getCurrencySymbol() }));
       metaEl.textContent = metaParts.join("  ·  ");
     }
 
     if (progressWrap && progressFill) {
-      if (limit > 0) {
+      if (hasLimit) {
         progressWrap.style.display = "";
-        var pctBar = Math.min((catTotal / limit) * 100, 100);
+        var pctBar = limit > 0 ? Math.min((catTotal / limit) * 100, 100) : (catTotal > 0 ? 100 : 0);
         progressFill.style.width = "0%";
         progressFill.style.background = cat.color;
         requestAnimationFrame(function () {
@@ -15804,6 +16213,13 @@ function renderFlexModelSummary() {
         chosenPlan: null,
         isInitialized: false
       });
+    }
+
+    // ── 3c) Сброс гибкой (cashflow) модели — иначе её данные «протекают» в новую
+    // цель (тип/частоты/суммы дохода-расхода) и плашка про неполный месяц больше
+    // не показывается (остаются старые cashflowStartedAt/partialExpense). ──
+    if (typeof window._resetFlexibleModelUI === "function") {
+      try { window._resetFlexibleModelUI(); } catch (e) { /* graceful */ }
     }
 
     // ── 4) Закрываем модалку с анимацией + полный refresh UI ──

@@ -994,6 +994,85 @@ window.triggerRenewalReminder = triggerRenewalReminder;
 window.triggerPremiumExpiredNotice = triggerPremiumExpiredNotice;
 window.pickServerLanguage = pickServerLanguage;
 
+/* ============================================================================
+ * EARLY BIRDS — акция «первые 500 = 15 дней Premium».
+ * ----------------------------------------------------------------------------
+ *   getEarlyBirdStatus() → { activated:boolean } | null
+ *     Читает строку early_bird_activations пользователя (RLS: только своя).
+ *     null = нет данных / не авторизованы → карточку не показываем (не спамим).
+ *
+ *   activateEarlyBird() → { ok, alreadyActivated?, premium_until?, gift_days? }
+ *     Дёргает Edge Function activate-early-bird. Личность проверяется на
+ *     сервере по initData (HMAC); премиум выдаётся через service_role.
+ * ============================================================================ */
+async function getEarlyBirdStatus() {
+  try {
+    if (!initSupabaseClient()) return null;
+    if (!(await ensureAuthenticated())) return null;
+    var identity = await getVerifiedUserIdentity();
+    if (!identity || !identity.telegram_id) return null;
+
+    var res = await supabaseClient
+      .from("early_bird_activations")
+      .select("telegram_id")
+      .eq("telegram_id", identity.telegram_id)
+      .maybeSingle();
+
+    if (res.error) {
+      console.warn("[EarlyBird] getEarlyBirdStatus ошибка:", res.error.message, res.error.code || "");
+      return null;
+    }
+    return { activated: !!res.data };
+  } catch (e) {
+    console.warn("[EarlyBird] getEarlyBirdStatus exception:", e && e.message);
+    return null;
+  }
+}
+
+async function activateEarlyBird() {
+  try {
+    var identity = await getVerifiedUserIdentity();
+    if (!identity || !identity.telegram_id) {
+      return { ok: false, error: "no_identity" };
+    }
+
+    var initData = "";
+    try {
+      var w = window.Telegram && window.Telegram.WebApp;
+      initData = (w && w.initData) || "";
+    } catch (_e) { /* ignore */ }
+    if (!initData) return { ok: false, error: "no_init_data" };
+
+    var url = SUPABASE_URL.replace(/\/$/, "") + "/functions/v1/activate-early-bird";
+    var tok = await _currentAuthToken();
+    var res = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "apikey": SUPABASE_ANON_KEY,
+        "Authorization": "Bearer " + tok
+      },
+      body: JSON.stringify({
+        telegram_id: identity.telegram_id,
+        init_data: initData
+      })
+    });
+
+    var data = await res.json().catch(function () { return null; });
+    if (!res.ok) {
+      console.error("[EarlyBird] activate HTTP " + res.status + ":", data && data.error);
+      return { ok: false, error: (data && data.error) || ("http_" + res.status) };
+    }
+    return data || { ok: false, error: "empty_response" };
+  } catch (e) {
+    console.error("[EarlyBird] activateEarlyBird exception:", e && e.message);
+    return { ok: false, error: String((e && e.message) || e) };
+  }
+}
+
+window.getEarlyBirdStatus = getEarlyBirdStatus;
+window.activateEarlyBird = activateEarlyBird;
+
 /**
  * STATISTICS COLLECTION — публичная статистика премиум/не-премиум пользователей.
  * Возвращает { premiumCount, freeCount, total }.

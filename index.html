@@ -190,15 +190,10 @@ viewport-fit=cover" />
         <div class="cf-fixed-hint-line" id="incomeFixedHintLine"></div>
         <div class="cf-fixed-hint-helper" data-i18n="flex.fixedSummary.helper">Используются данные, введённые при открытии гибкой модели</div>
       </div>
-      <!-- Сумма дохода вводится через карточку «+ Записать поступление» ниже -
-           отдельное поле суммы убрано, чтобы не дублировать ввод. В non-fixed
-           режиме здесь остаётся только дата старта периодического дохода. -->
-      <div id="fixedIncomeWrap" class="cf-fixed-amount-wrap cf-nonfixed-wrap" style="display:none">
-        <div class="cf-startdate-row">
-          <label for="incomeStartDate" class="cf-startdate-label" data-i18n="flex.variable.startDate.income">Дата первого поступления</label>
-          <input id="incomeStartDate" type="date" class="cf-startdate-input" data-i18n-placeholder="flex.start.placeholder" />
-        </div>
-      </div>
+      <!-- Поле «Дата первого поступления» убрано: дата старта расписания
+           выбирается прямо в окне настройки частоты (ежемесячно/раз в неделю/
+           раз в 2 нед.), поэтому отдельное поле здесь дублировало ввод. Для
+           «Свой график» дата берётся из каждого конкретного поступления. -->
       <div id="incomeFrequencySelector" class="frequency-selector" data-for="income">
         <div class="cf-freq-label" data-i18n="flex.freq.label.income">Как часто вы получаете доход?</div>
         <div class="freq-grid">
@@ -260,15 +255,9 @@ viewport-fit=cover" />
         <div class="cf-fixed-hint-line" id="expenseFixedHintLine"></div>
         <div class="cf-fixed-hint-helper" data-i18n="flex.fixedSummary.helper">Используются данные, введённые при открытии гибкой модели</div>
       </div>
-      <!-- Сумма расхода вводится через карточку «+ Записать расход» ниже -
-           отдельное поле суммы убрано, чтобы не дублировать ввод. В non-fixed
-           режиме здесь остаётся только дата старта периодического расхода. -->
-      <div id="fixedExpenseWrap" class="cf-fixed-amount-wrap cf-nonfixed-wrap" style="display:none">
-        <div class="cf-startdate-row">
-          <label for="expenseStartDate" class="cf-startdate-label" data-i18n="flex.variable.startDate.expense">Дата первого расхода</label>
-          <input id="expenseStartDate" type="date" class="cf-startdate-input" data-i18n-placeholder="flex.start.placeholder" />
-        </div>
-      </div>
+      <!-- Поле «Дата первого расхода» убрано: дата старта расписания выбирается
+           в окне настройки частоты, отдельное поле здесь дублировало ввод. Для
+           «Свой график» дата берётся из каждого конкретного расхода. -->
       <div id="expenseFrequencySelector" class="frequency-selector" data-for="expense">
         <div class="cf-freq-label" data-i18n="flex.freq.label.expense">Как часто вы тратите деньги?</div>
         <div class="freq-grid">
@@ -2039,7 +2028,7 @@ z-index: 999999;
          блок скрыт (расход не отлагается на цель). -->
     <div class="cs-live-preview" id="csLivePreview" style="display:none">
       <div class="cs-live-preview-row">
-        <span class="cs-live-preview-label" data-i18n="cs.preview.willDeposit">Будет отложено на цель</span>
+        <span class="cs-live-preview-label" data-i18n="cs.preview.willDeposit">Отложите на вашу цель</span>
         <strong class="cs-live-preview-amount" id="csLivePreviewAmount">0 ₽</strong>
       </div>
       <div class="cs-live-preview-mode" id="csLivePreviewMode">-</div>
@@ -2165,6 +2154,39 @@ z-index: 999999;
   </div>
 
   <button type="button" id="goalHistoryDetailCloseBtn" class="goal-history-detail-close-btn" data-i18n="goalHistory.detail.close">Закрыть</button>
+</div>
+
+<!-- EARLY BIRDS — акция «первые 500 пользователей = 15 дней Premium».
+     Показывается один раз новым пользователям после онбординга (есть план +
+     хотя бы одна цель) при заходе на вкладку Protocol. Грант — через
+     Edge Function activate-early-bird. См. app.js → maybeShowEarlyBirdCard(). -->
+<div id="earlyBirdOverlay" class="eb-overlay hidden"></div>
+<div id="earlyBirdModal" class="eb-modal hidden" role="dialog" aria-modal="true" aria-labelledby="earlyBirdTitle">
+  <div class="eb-glow"></div>
+
+  <!-- DEFAULT (предложение активировать) -->
+  <div class="eb-view eb-view--default">
+    <div class="eb-counter" id="earlyBirdCounter">500 / 500</div>
+    <div class="eb-badge"><span class="eb-badge-icon">👑</span></div>
+    <h2 class="eb-title" id="earlyBirdTitle" data-i18n="earlyBird.title">Поздравляем! Вы в числе первых 500 пользователей</h2>
+    <p class="eb-subtitle" data-i18n="earlyBird.subtitle">Вам доступны 15 дней Premium бесплатно</p>
+    <ul class="eb-benefits">
+      <li class="eb-benefit"><span class="eb-check">✓</span><span data-i18n="earlyBird.b1">Изменение темпа накоплений</span></li>
+      <li class="eb-benefit"><span class="eb-check">✓</span><span data-i18n="earlyBird.b2">Кредиты и долги в едином плане</span></li>
+      <li class="eb-benefit"><span class="eb-check">✓</span><span data-i18n="earlyBird.b3">Гибкая финансовая модель</span></li>
+      <li class="eb-benefit"><span class="eb-check">✓</span><span data-i18n="earlyBird.b4">Расширенные настройки портфеля</span></li>
+      <li class="eb-benefit"><span class="eb-check">✓</span><span data-i18n="earlyBird.b5">Полная статистика счёта</span></li>
+    </ul>
+    <button id="earlyBirdActivateBtn" class="eb-cta" type="button" data-i18n="earlyBird.cta">Активировать 15 дней Premium</button>
+  </div>
+
+  <!-- SUCCESS (подтверждение) -->
+  <div class="eb-view eb-view--success">
+    <div class="eb-badge eb-badge--success"><span class="eb-badge-icon">🎉</span></div>
+    <h2 class="eb-title" data-i18n="earlyBird.success.title">Premium активирован!</h2>
+    <p class="eb-subtitle" id="earlyBirdSuccessText" data-i18n="earlyBird.success.text">15 дней Premium уже у вас — откройте все возможности приложения.</p>
+    <button id="earlyBirdContinueBtn" class="eb-cta" type="button" data-i18n="earlyBird.success.cta">Продолжить</button>
+  </div>
 </div>
 
 <!-- PREMIUM MODAL - полноэкранный слайдер премиум-преимуществ.

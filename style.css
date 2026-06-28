@@ -767,6 +767,28 @@ margin-top: 12px;
 background: #111;
 color: #fff;
 border: 1px solid #333;
+display: flex;
+align-items: center;
+justify-content: center;
+gap: 10px;
+}
+
+/* Иконки в кнопках профиля — инлайн-SVG со stroke="currentColor": цвет
+   подхватывается от текста кнопки (белый / красный у «Начать сначала» /
+   мятный у «Сообщить о проблеме»). Инлайн надёжнее mask/img в Telegram WebView. */
+.profile-btn-icon {
+  display: block;
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+}
+/* Форсируем outline-рендер: некоторые WebView (Telegram iOS) игнорируют
+   presentation-атрибут fill="none" и заливают путь currentColor (получались
+   сплошные квадраты). CSS перебивает атрибуты, поэтому задаём явно. */
+.profile-btn-icon,
+.profile-btn-icon * {
+  fill: none !important;
+  stroke: currentColor;
 }
 
 .profile-btn.danger {
@@ -11328,6 +11350,9 @@ body.reduce-motion .settings-seg-btn {
   z-index: 4001;
   left: 50%;
   top: 50%;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
   width: calc(100% - 40px);
   max-width: 380px;
   max-height: calc(var(--tg-vh, 100vh) - 48px);
@@ -11335,7 +11360,7 @@ body.reduce-motion .settings-seg-btn {
   -webkit-overflow-scrolling: touch;
   transform: translate(-50%, -46%) scale(0.94);
   opacity: 0;
-  padding: 26px 22px 22px;
+  padding: 28px 22px;
   border-radius: 26px;
   text-align: center;
   background:
@@ -11351,7 +11376,9 @@ body.reduce-motion .settings-seg-btn {
 .eb-modal.open { transform: translate(-50%, -50%) scale(1); opacity: 1; }
 .eb-modal.hidden { display: none; }
 
-/* Мягкое свечение за карточкой */
+/* Мягкое свечение за карточкой. ВАЖНО: оно absolute и НЕ должно попадать под
+   общее правило позиционирования контента — иначе займёт 220px в потоке и
+   создаст пустоту сверху карточки. */
 .eb-glow {
   position: absolute;
   top: -40px;
@@ -11364,7 +11391,8 @@ body.reduce-motion .settings-seg-btn {
   pointer-events: none;
   z-index: 0;
 }
-.eb-modal > * { position: relative; z-index: 1; }
+/* z-index только для контента (вьюх), чтобы не трогать absolute-свечение. */
+.eb-view { position: relative; z-index: 1; }
 
 /* Переключение default ↔ success */
 .eb-view--success { display: none; }
@@ -11398,6 +11426,32 @@ body.reduce-motion .settings-seg-btn {
   animation: ebBadgePop 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 .eb-badge-icon { font-size: 34px; line-height: 1; }
+
+/* Контейнер под Lottie-корону (king1.json) в дефолтном виде плашки. */
+.eb-crown-lottie {
+  width: 52px;
+  height: 52px;
+  pointer-events: none;
+}
+.eb-crown-lottie svg {
+  width: 100% !important;
+  height: 100% !important;
+  display: block;
+}
+
+/* Иконка салюта (Party) в success-виде — инлайн-SVG, светлый мятный тон
+   контрастно на изумрудном круге бейджа. */
+.eb-party-icon {
+  display: block;
+  width: 38px;
+  height: 38px;
+  color: #6ee7b7;
+}
+.eb-party-icon,
+.eb-party-icon * {
+  fill: none !important;
+  stroke: currentColor;
+}
 @keyframes ebBadgePop {
   0% { transform: scale(0.6); opacity: 0; }
   100% { transform: scale(1); opacity: 1; }

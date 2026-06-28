@@ -1183,8 +1183,10 @@ window.addEventListener("load", function () {
 });
 
 // NEW: Media attachment in reports
-// Bucket `report-media` должен существовать в Supabase Storage с публичным доступом
-// (см. инструкцию в финальном ответе ассистента — INSERT policy + read-anon policy).
+// Bucket `report-media` — ПРИВАТНЫЙ (security-аудит M1). Загрузка: authenticated
+// только в свою папку reports/<telegram_id>/...; чтение — владелец своей папки
+// или service_role (signed URL). В reports.media_urls хранятся ОБЪЕКТНЫЕ ПУТИ,
+// не публичные ссылки. Политики: migrations/20260628_security_hardening.sql.
 //
 // Имена файлов санитизируются: только [A-Za-z0-9._-], всё остальное → `_`.
 // Путь: reports/{telegramId}/{Date.now()}/{idx}_{safeName}
@@ -1376,13 +1378,13 @@ window.saveReport = async (telegramId, message, files, onProgress) => {
           onProgress(Math.min(1, completedBytes / totalBytes));
         }
 
-        // Public URL — строим вручную (то же, что вернул бы getPublicUrl
-        // на public bucket'е). Дёшево, без сетевого вызова.
-        var publicUrl = SUPABASE_URL.replace(/\/$/, "") +
-                        "/storage/v1/object/public/report-media/" + path;
-
-        mediaUrls.push(publicUrl);
-        console.log('%c[Report] Загружен файл:', 'color: #10b981', safeName, '→', publicUrl);
+        // SECURITY (M1): бакет report-media теперь ПРИВАТНЫЙ. Публичные ссылки
+        // больше не работают, поэтому храним ОБЪЕКТНЫЙ ПУТЬ (key внутри бакета).
+        // Админ просматривает через signed URL:
+        //   supabase.storage.from('report-media').createSignedUrl(path, 3600)
+        // (вызывается с service_role — обходит RLS).
+        mediaUrls.push(path);
+        console.log('%c[Report] Загружен файл:', 'color: #10b981', safeName, '→', path);
       }
 
       // Финальный пуш прогресса до 1.0 после всех файлов.

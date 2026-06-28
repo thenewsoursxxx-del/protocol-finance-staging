@@ -3555,6 +3555,11 @@ loader.classList.add("hidden");
 hideSplashVideo();
 renderProtocolAdviceGraph();
 saveFullState();
+// EARLY BIRDS — показываем карточку акции ТОЛЬКО после завершения фейк-загрузки
+// и fade-out сплеша (~450мс), а не поверх неё.
+if (typeof maybeShowEarlyBirdCard === "function") {
+  setTimeout(function () { try { maybeShowEarlyBirdCard(); } catch (e) { /* noop */ } }, 600);
+}
 }, 6000);
 }
 
@@ -4660,6 +4665,16 @@ function showToast(message, type, opts) {
 var _earlyBirdShownThisSession = false;
 var _earlyBirdWired = false;
 
+function _restoreNavAfterEarlyBird() {
+  // Возвращаем навбар только на основных вкладках (как в ProtoSheet.close).
+  if (typeof showBottomNav !== "function") return;
+  var act = document.querySelector(".screen.active");
+  if (act && typeof SCREEN_TO_NAV_INDEX !== "undefined" &&
+      SCREEN_TO_NAV_INDEX.hasOwnProperty(act.id)) {
+    showBottomNav();
+  }
+}
+
 function _closeEarlyBirdModal() {
   var ov = document.getElementById("earlyBirdOverlay");
   var md = document.getElementById("earlyBirdModal");
@@ -4668,12 +4683,47 @@ function _closeEarlyBirdModal() {
   setTimeout(function () {
     if (md) md.classList.add("hidden");
     if (ov) ov.classList.add("hidden");
-    // Protocol — основная вкладка: возвращаем навбар, если она ещё активна.
-    if (typeof showBottomNav === "function") {
-      var act = document.querySelector(".screen.active");
-      if (act && act.id === "screen-advice") showBottomNav();
-    }
+    _restoreNavAfterEarlyBird();
+    // Повторный вызов добивает гонку с syncUserAccessFlagsFromDB, который
+    // после активации премиума перерисовывает premium-UI.
+    setTimeout(_restoreNavAfterEarlyBird, 700);
   }, 340);
+}
+
+// EARLY BIRDS — одиночный изумрудный залп конфетти (слева и справа) на success.
+// Не путать с праздником выполнения цели: тут один короткий выстрел, только
+// оттенки изумрудного. Своя канва с z-index выше модалки (иначе глобальная
+// confetti-канва z-index ~100 ушла бы за оверлей акции, z-index 4000).
+var _ebConfettiFn = null;
+function _fireEarlyBirdConfetti() {
+  try {
+    if (typeof isAnimationsEnabled === "function" && !isAnimationsEnabled()) return;
+    if (!window.confetti || typeof window.confetti.create !== "function") return;
+    if (!_ebConfettiFn) {
+      var c = document.getElementById("eb-confetti-canvas");
+      if (!c) {
+        c = document.createElement("canvas");
+        c.id = "eb-confetti-canvas";
+        c.style.cssText = "position:fixed;inset:0;width:100%;height:100%;pointer-events:none;z-index:4002;";
+        document.body.appendChild(c);
+      }
+      _ebConfettiFn = window.confetti.create(c, { resize: true, useWorker: true });
+    }
+    var common = {
+      spread: 68,
+      startVelocity: 44,
+      gravity: 0.9,
+      decay: 0.9,
+      ticks: 160,
+      scalar: 1.05,
+      shapes: ["square", "circle"],
+      colors: EMERALD_CONFETTI_COLORS
+    };
+    _ebConfettiFn(Object.assign({}, common, { particleCount: 55, angle: 65, origin: { x: 0.04, y: 0.62 } }));
+    _ebConfettiFn(Object.assign({}, common, { particleCount: 55, angle: 115, origin: { x: 0.96, y: 0.62 } }));
+    // Лёгкий центральный «пшик» вверх — добавляет объёма, оставаясь одним залпом.
+    _ebConfettiFn(Object.assign({}, common, { particleCount: 24, angle: 90, spread: 90, origin: { x: 0.5, y: 0.66 } }));
+  } catch (e) { /* noop */ }
 }
 
 function _wireEarlyBird() {
@@ -4695,12 +4745,32 @@ function _wireEarlyBird() {
         : { ok: false }
     ).then(function (r) {
       if (r && r.ok) {
-        // Обновляем premium-статус из БД → разблокирует premium-UI.
+        // Оптимистично включаем premium ЛОКАЛЬНО сразу (как в stars-flow),
+        // иначе premium-функции остаются заблокированными, пока асинхронный
+        // syncUserAccessFlagsFromDB (сетевой запрос) не завершится/не упадёт.
+        var until = r.premium_until ||
+          new Date(Date.now() + 15 * 24 * 60 * 60 * 1000).toISOString();
+        if (typeof updateState === "function") {
+          updateState({ isPremium: true, premiumUntil: until, autoRenew: false });
+        } else if (window.appState) {
+          window.appState.isPremium = true;
+          window.appState.premiumUntil = until;
+          window.appState.autoRenew = false;
+        }
+        if (typeof saveFullState === "function") {
+          try { saveFullState(); } catch (e) { /* graceful */ }
+        }
+        // Мгновенно перерисовываем premium-UI (снимает локи).
+        if (typeof window._syncPremiumUI === "function") window._syncPremiumUI();
+        if (typeof renderAccountBackCards === "function") renderAccountBackCards();
+        if (typeof refreshProfileStats === "function") refreshProfileStats();
+        // Затем подтверждаем canonical-значения из БД.
         if (typeof window.syncUserAccessFlagsFromDB === "function") {
           window.syncUserAccessFlagsFromDB();
         }
         md.classList.add("eb-modal--activated");
         if (typeof haptic === "function") haptic("success");
+        _fireEarlyBirdConfetti();
       } else {
         actBtn.disabled = false;
         actBtn.textContent = prevText;
@@ -4720,12 +4790,46 @@ function _wireEarlyBird() {
     });
   }
 
-  // Safety valve: тап по фону закрывает карточку (нет залипания навбара, если
-  // активация не удалась). Полноценной кнопки «Позже» при этом нет.
+  // Пространство за краями карточки НЕ кликабельно — закрыть акцию можно только
+  // через кнопки внутри карточки (активировать → продолжить). Оверлей лишь
+  // перехватывает тапы, чтобы они не проходили на UI под ним, но сам ничего
+  // не закрывает.
   var ov = document.getElementById("earlyBirdOverlay");
   if (ov) {
-    ov.addEventListener("click", function () { _closeEarlyBirdModal(); });
+    ov.addEventListener("click", function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    });
   }
+}
+
+// EARLY BIRDS — анимированная корона (Lottie king1.json) в дефолтном виде.
+// Грузим JSON один раз и инициализируем инстанс лениво при первом открытии.
+var _ebCrownData = null;
+var _ebCrownPromise = null;
+var _ebCrownInstance = null;
+function _ensureEarlyBirdCrown() {
+  if (_ebCrownInstance) return;
+  var el = document.getElementById("earlyBirdCrown");
+  if (!el || typeof lottie === "undefined") return;
+  if (!_ebCrownPromise) {
+    _ebCrownPromise = fetch("./assets/animation/king1.json")
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (j) { _ebCrownData = j; return j; })
+      .catch(function () { return null; });
+  }
+  _ebCrownPromise.then(function (data) {
+    if (!data || _ebCrownInstance) return;
+    try {
+      _ebCrownInstance = lottie.loadAnimation({
+        container: el,
+        renderer: "svg",
+        loop: true,
+        autoplay: true,
+        animationData: data
+      });
+    } catch (e) { /* graceful */ }
+  });
 }
 
 function _openEarlyBirdModal() {
@@ -4733,6 +4837,7 @@ function _openEarlyBirdModal() {
   var md = document.getElementById("earlyBirdModal");
   if (!ov || !md) return;
   _wireEarlyBird();
+  _ensureEarlyBirdCrown();
 
   // Сброс в дефолтное состояние (на случай повторного открытия в сессии).
   md.classList.remove("eb-modal--activated");
@@ -4752,21 +4857,59 @@ function _openEarlyBirdModal() {
   if (typeof haptic === "function") haptic("light");
 }
 
-function maybeShowEarlyBirdCard() {
+// Идёт ли сейчас фейк-загрузка/сплеш на экране Protocol. Карточку акции НЕЛЬЗЯ
+// показывать поверх неё — только после того, как загрузка завершится и график
+// отрисуется.
+function _isProtocolLoading() {
+  try {
+    if (typeof loader !== "undefined" && loader && !loader.classList.contains("hidden")) return true;
+    var sp = document.getElementById("splashVideoOverlay");
+    if (sp && !sp.classList.contains("hidden")) return true;
+    var card = document.getElementById("adviceCard");
+    if (card && card.querySelector("#fakeScreen")) return true;
+  } catch (e) { /* noop */ }
+  return false;
+}
+
+// Показ карточки Early Bird. Самовосстанавливающийся: повторяет попытку, если
+// (а) идёт фейк-загрузка, (б) auth/сеть ещё не готовы (status === null).
+// Это гарантирует, что КАЖДЫЙ подходящий пользователь увидит акцию, а не
+// «иногда не показалось». Идемпотентно: _earlyBirdShownThisSession + проверка
+// внутри .then не дают открыть модалку дважды.
+function maybeShowEarlyBirdCard(attempt) {
+  attempt = attempt || 1;
   try {
     if (_earlyBirdShownThisSession) return;
     if (!isInitialized || !chosenPlan) return;
     var goals = (typeof getGoals === "function") ? getGoals() : [];
     if (!goals || goals.length < 1) return;
+
+    // Не показываем поверх фейк-загрузки — ждём её завершения.
+    if (_isProtocolLoading()) {
+      if (attempt < 14) setTimeout(function () { maybeShowEarlyBirdCard(attempt + 1); }, 800);
+      return;
+    }
+
     if (typeof window.getEarlyBirdStatus !== "function") return;
     window.getEarlyBirdStatus().then(function (st) {
-      // null = не авторизованы / нет данных → не показываем (попробуем позже).
-      if (!st) return;
-      if (st.activated) return;
       if (_earlyBirdShownThisSession) return;
+      // null = auth/сеть ещё не готовы → повторим (до 4 раз), чтобы у каждого
+      // пользователя акция всё-таки показалась, а не пропала из-за гонки auth.
+      if (st === null) {
+        if (attempt < 5) setTimeout(function () { maybeShowEarlyBirdCard(attempt + 1); }, 1500);
+        return;
+      }
+      if (st.activated) return;
+      // Загрузка могла начаться, пока шёл запрос — перепроверяем.
+      if (_isProtocolLoading()) {
+        if (attempt < 14) setTimeout(function () { maybeShowEarlyBirdCard(attempt + 1); }, 800);
+        return;
+      }
       _earlyBirdShownThisSession = true;
       _openEarlyBirdModal();
-    }).catch(function () { /* noop */ });
+    }).catch(function () {
+      if (attempt < 5) setTimeout(function () { maybeShowEarlyBirdCard(attempt + 1); }, 1500);
+    });
   } catch (e) { /* noop */ }
 }
 window.maybeShowEarlyBirdCard = maybeShowEarlyBirdCard;

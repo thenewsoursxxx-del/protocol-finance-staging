@@ -391,11 +391,11 @@
       // PREMIUM PROFILE BADGE - текст изумрудной плашки рядом с именем
       // (показывается, когда isPremiumActive()=true).
       "profile.premiumBadge": "Premium",
-      "profile.settings": "⚙️ Настройки",
-      "profile.goalHistory": "📋 История целей",
+      "profile.settings": "Настройки",
+      "profile.goalHistory": "История целей",
       "profile.resetPlan": "🔄 Сбросить план",
       // NEW: Full reset button in Profile - финальный текст кнопки "Начать сначала".
-      "profile.fullReset": "🆕 Начать сначала",
+      "profile.fullReset": "Начать сначала",
       // STATISTICS COLLECTION - заголовки блока статистики сообщества
       "profile.stats.title":   "Статистика сообщества",
       "profile.stats.premium": "Пользователей с премиум",
@@ -424,7 +424,7 @@
       "earlyBird.success.cta": "Продолжить",
       "earlyBird.error": "Не удалось активировать. Попробуйте ещё раз.",
       // NEW: Report problem feature
-      "profile.reportProblem": "🐞 Сообщить о проблеме",
+      "profile.reportProblem": "Сообщить о проблеме",
       "report.modal.title": "Сообщить о проблеме",
       "report.modal.subtitle": "Ваше сообщение поможет нам улучшить Protocol",
       "report.modal.placeholder": "Опишите проблему как можно подробнее…",
@@ -1522,11 +1522,11 @@
       // PREMIUM PROFILE BADGE - label of the emerald badge next to the name
       // (visible when isPremiumActive()=true).
       "profile.premiumBadge": "Premium",
-      "profile.settings": "⚙️ Settings",
-      "profile.goalHistory": "📋 Goal History",
+      "profile.settings": "Settings",
+      "profile.goalHistory": "Goal History",
       "profile.resetPlan": "🔄 Reset Plan",
       // NEW: Full reset button in Profile
-      "profile.fullReset": "🆕 Start Over",
+      "profile.fullReset": "Start Over",
       // STATISTICS COLLECTION - community stats block headings
       "profile.stats.title":   "Community Stats",
       "profile.stats.premium": "Premium users",
@@ -1555,7 +1555,7 @@
       "earlyBird.success.cta": "Continue",
       "earlyBird.error": "Activation failed. Please try again.",
       // NEW: Report problem feature
-      "profile.reportProblem": "🐞 Report a problem",
+      "profile.reportProblem": "Report a problem",
       "report.modal.title": "Report a problem",
       "report.modal.subtitle": "Your message helps us improve Protocol",
       "report.modal.placeholder": "Describe the problem in as much detail as possible…",
